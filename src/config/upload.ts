@@ -49,6 +49,24 @@ export const uploadConfig: UploadConstraints = {
     ".ppt",
     ".pptx",
     ".json",
+    ".zip",
+    ".rar",
+    ".7z",
+    ".gz",
+    ".tgz",
+    ".tar",
+    ".tar.gz",
+    ".bz2",
+    ".tar.bz2",
+    ".tbz2",
+    ".xz",
+    ".lz",
+    ".lzma",
+    ".cab",
+    ".iso",
+    ".jar",
+    ".war",
+    ".apk"
   ],
   allowedMimeTypes: [
     "image/png",
@@ -92,18 +110,29 @@ export const uploadConfig: UploadConstraints = {
     "application/vnd.ms-powerpoint",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/json",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/vnd.rar",
+    "application/gzip",
+    "application/x-gzip",
+    "application/x-tar",
+    "application/x-bzip2",
+    "application/x-xz",
+    "application/x-iso9660-image",
+    "application/java-archive",
+    "application/vnd.android.package-archive",
+    "application/octet-stream"
   ],
-  maxFileSizeBytes: 500 * 1024 * 1024,
+  maxFileSizeBytes: 500 * 1024 * 1024
 };
 
 export const accept = uploadConfig.allowedExtensions.join(",");
 
 export const defaultExpiresDays = 7;
 
-export function computeExpiresAt(
-  from: Date = new Date(),
-  days = defaultExpiresDays,
-) {
+export function computeExpiresAt(from: Date = new Date(), days = defaultExpiresDays) {
   const d = new Date(from);
   d.setDate(d.getDate() + days);
   return d;
@@ -121,22 +150,57 @@ export function formatBytes(bytes: number): string {
   return `${size.toFixed(precision)}${units[i]}`;
 }
 
-export function validateFile(
-  file: File,
-  cfg: UploadConstraints = uploadConfig,
-): { valid: boolean; error?: string } {
-  const ext = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
-  const typeOk =
-    cfg.allowedMimeTypes.includes(file.type) ||
-    cfg.allowedExtensions.includes(ext);
+export function validateFile(file: File, cfg: UploadConstraints = uploadConfig): { valid: boolean; error?: string } {
+  const name = file.name.toLowerCase();
+  const extOk = cfg.allowedExtensions.some(ext => name.endsWith(ext.toLowerCase()));
+  const typeOk = cfg.allowedMimeTypes.includes(file.type) || extOk;
   if (!typeOk) {
     return { valid: false, error: "File type not allowed." };
   }
   if (file.size > cfg.maxFileSizeBytes) {
-    return {
-      valid: false,
-      error: "File exceeds the maximum allowed size.",
-    };
+    return { valid: false, error: "File exceeds the maximum allowed size." };
   }
   return { valid: true };
+}
+
+export function isArchiveFile(file: File): boolean {
+  const archiveExts = [
+    ".zip",
+    ".rar",
+    ".7z",
+    ".gz",
+    ".tgz",
+    ".tar",
+    ".tar.gz",
+    ".bz2",
+    ".tar.bz2",
+    ".tbz2",
+    ".xz",
+    ".lz",
+    ".lzma",
+    ".cab",
+    ".iso",
+    ".jar",
+    ".war",
+    ".apk"
+  ];
+  const archiveMimes = [
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/vnd.rar",
+    "application/gzip",
+    "application/x-gzip",
+    "application/x-tar",
+    "application/x-bzip2",
+    "application/x-xz",
+    "application/x-iso9660-image",
+    "application/java-archive",
+    "application/vnd.android.package-archive",
+    "application/octet-stream"
+  ];
+  const name = file.name.toLowerCase();
+  const extMatches = archiveExts.some(ext => name.endsWith(ext));
+  return extMatches || archiveMimes.includes(file.type);
 }
