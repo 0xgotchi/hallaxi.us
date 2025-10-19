@@ -1,16 +1,11 @@
-// Configurações de upload: formatos permitidos e limite de tamanho
 export type UploadConstraints = {
-  // Extensões permitidas (usadas no atributo `accept` do input)
   allowedExtensions: string[];
-  // Tipos MIME permitidos (útil para validações no backend ou client)
   allowedMimeTypes: string[];
-  // Limite máximo de tamanho por arquivo em bytes
   maxFileSizeBytes: number;
 };
 
 export const uploadConfig: UploadConstraints = {
   allowedExtensions: [
-    // Imagens
     ".png",
     ".jpg",
     ".jpeg",
@@ -24,7 +19,6 @@ export const uploadConfig: UploadConstraints = {
     ".heic",
     ".heif",
     ".ico",
-    // Áudio
     ".mp3",
     ".wav",
     ".ogg",
@@ -33,7 +27,6 @@ export const uploadConfig: UploadConstraints = {
     ".aac",
     ".webma",
     ".opus",
-    // Vídeo
     ".mp4",
     ".webm",
     ".ogv",
@@ -43,7 +36,6 @@ export const uploadConfig: UploadConstraints = {
     ".m4v",
     ".ts",
     ".3gp",
-    // Documentos
     ".pdf",
     ".txt",
     ".md",
@@ -59,7 +51,6 @@ export const uploadConfig: UploadConstraints = {
     ".json",
   ],
   allowedMimeTypes: [
-    // Imagens
     "image/png",
     "image/jpeg",
     "image/webp",
@@ -71,7 +62,6 @@ export const uploadConfig: UploadConstraints = {
     "image/heic",
     "image/heif",
     "image/x-icon",
-    // Áudio
     "audio/mpeg",
     "audio/wav",
     "audio/ogg",
@@ -80,7 +70,6 @@ export const uploadConfig: UploadConstraints = {
     "audio/aac",
     "audio/webm",
     "audio/opus",
-    // Vídeo
     "video/mp4",
     "video/webm",
     "video/ogg",
@@ -90,7 +79,6 @@ export const uploadConfig: UploadConstraints = {
     "video/x-m4v",
     "video/mp2t",
     "video/3gpp",
-    // Documentos
     "application/pdf",
     "text/plain",
     "text/markdown",
@@ -105,13 +93,11 @@ export const uploadConfig: UploadConstraints = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/json",
   ],
-  maxFileSizeBytes: 500 * 1024 * 1024, // 500 MB
+  maxFileSizeBytes: 500 * 1024 * 1024,
 };
 
-// String para o atributo `accept` (ex.: .png,.jpg,.jpeg,.webp,.pdf)
 export const accept = uploadConfig.allowedExtensions.join(",");
 
-// Dias para expiração padrão (configurável)
 export const defaultExpiresDays = 7;
 
 export function computeExpiresAt(
@@ -123,7 +109,6 @@ export function computeExpiresAt(
   return d;
 }
 
-// Utilitário para formatar bytes em unidade legível (B/KB/MB/GB/TB)
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"] as const;
   let size = bytes;
@@ -136,7 +121,6 @@ export function formatBytes(bytes: number): string {
   return `${size.toFixed(precision)}${units[i]}`;
 }
 
-// Validação simples de arquivo (pode ser usada no client e replicada no backend)
 export function validateFile(
   file: File,
   cfg: UploadConstraints = uploadConfig,
@@ -146,12 +130,12 @@ export function validateFile(
     cfg.allowedMimeTypes.includes(file.type) ||
     cfg.allowedExtensions.includes(ext);
   if (!typeOk) {
-    return { valid: false, error: "Formato de arquivo não permitido." };
+    return { valid: false, error: "File type not allowed." };
   }
   if (file.size > cfg.maxFileSizeBytes) {
     return {
       valid: false,
-      error: "Arquivo excede o tamanho máximo permitido.",
+      error: "File exceeds the maximum allowed size.",
     };
   }
   return { valid: true };

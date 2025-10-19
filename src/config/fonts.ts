@@ -1,6 +1,5 @@
 import { Inter } from "next/font/google";
 
-// Configure Inter as the default sans font
 export const inter = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
