@@ -16,12 +16,6 @@ export async function processUploadJob(jobData: any) {
   const { sessionId, file, expiresField, submittedDomain } = jobData;
 
   try {
-    console.log("ProcessUploadJob started for session:", sessionId);
-    
-    // Update progress in database
-    await updateSessionProgress(sessionId, 5);
-    await reportProgress(sessionId, 5);
-
     const r2 = getR2Client();
     if (!r2) throw new Error("R2 client not initialized");
 
@@ -32,70 +26,39 @@ export async function processUploadJob(jobData: any) {
       ? submittedDomain
       : allowedDomains[0];
 
-    let slug = generateSlug();
-    for (let i = 0; i < 5; i++) {
-      const exists = await prisma.upload.findUnique({ where: { url: slug } });
-      if (!exists) break;
-      slug = generateSlug();
-    }
+    const slug = generateSlug();
+    const id = generateSnowflakeId();
 
     const now = new Date();
-    let expiresAt: Date;
-    if (expiresField === "1h")
-      expiresAt = new Date(now.getTime() + 1 * 60 * 60 * 1000);
-    else if (expiresField === "1d") expiresAt = computeExpiresAt(now, 1);
-    else if (expiresField === "7d") expiresAt = computeExpiresAt(now, 7);
-    else if (expiresField === "30d") expiresAt = computeExpiresAt(now, 30);
-    else expiresAt = computeExpiresAt(now, 7);
+    const expiresAt = calculateExpiresAt(expiresField, now);
 
-    let id = "";
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const generatedId = generateSnowflakeId();
-      const exists = await prisma.upload.findUnique({
-        where: { id: generatedId },
-      });
-      if (!exists) {
-        await prisma.upload.create({
-          data: {
-            id: generatedId,
-            filename: file.name,
-            type: file.type,
-            url: slug,
-            uploadAt: now,
-            expiresAt,
-            domain,
-            r2Key: "",
-          },
-        });
-        id = generatedId;
-        break;
-      }
+    await prisma.upload.create({
+      data: {
+        id,
+        filename: file.name,
+        type: file.type,
+        url: slug,
+        uploadAt: now,
+        expiresAt,
+        domain,
+        r2Key: "",
+      },
+    });
+
+    if (file.size > 1024 * 1024) {
+      await reportProgress(sessionId, 30);
     }
-
-    if (!id) throw new Error("Failed to create upload record");
-
-    console.log("Database record created, ID:", id);
-    await updateSessionProgress(sessionId, 10);
-    await reportProgress(sessionId, 10);
 
     const fileBuffer = Buffer.from(file.buffer, "base64");
     const key = `${id}/${file.name}`;
-    const sse =
-      process.env.R2_FORCE_SSE === "true" ? ("AES256" as const) : undefined;
-
-    console.log("File size:", file.size, "Using multipart:", file.size > 5 * 1024 * 1024);
-
-    let finalResult;
 
     if (file.size <= 5 * 1024 * 1024) {
-      console.log("Using single part upload");
       await r2.send(
         new PutObjectCommand({
           Bucket: bucket,
           Key: key,
           Body: fileBuffer,
           ContentType: file.type,
-          ...(sse ? { ServerSideEncryption: sse } : {}),
         }),
       );
 
@@ -104,7 +67,7 @@ export async function processUploadJob(jobData: any) {
         data: { r2Key: key, domain },
       });
 
-      finalResult = {
+      const finalResult = {
         slug,
         filename: file.name,
         size: file.size,
@@ -114,49 +77,49 @@ export async function processUploadJob(jobData: any) {
         completed: true,
       };
 
-      console.log("Single part upload completed");
-      await updateSessionProgress(sessionId, 100);
-      await reportProgress(sessionId, 100);
-      await sendResult(sessionId, finalResult);
+      if (file.size > 1024 * 1024) {
+        await reportProgress(sessionId, 100);
+        await sendResult(sessionId, finalResult);
+      }
+
+      return finalResult;
     } else {
-      console.log("Using multipart upload");
-      finalResult = await processMultipartUpload(
+      return await processMultipartUpload(
         sessionId,
         id,
         slug,
         file,
         fileBuffer,
         key,
-        sse,
         domain,
       );
     }
-
-    return finalResult;
   } catch (error) {
     console.error(`Upload failed for ${sessionId}:`, error);
-    await updateSessionProgress(sessionId, -1, error instanceof Error ? error.message : "Upload failed");
-    await sendError(
-      sessionId,
-      error instanceof Error ? error.message : "Upload failed",
-    );
+    if (file.size > 1024 * 1024) {
+      await sendError(
+        sessionId,
+        error instanceof Error ? error.message : "Upload failed",
+      );
+    }
     throw error;
   }
 }
 
-async function updateSessionProgress(sessionId: string, progress: number, error?: string) {
-  try {
-    await prisma.uploadSession.update({
-      where: { id: sessionId },
-      data: {
-        progress,
-        ...(error && { error, status: "failed" }),
-        ...(progress === 100 && { status: "completed" }),
-        ...(progress === -1 && { status: "failed" }),
-      },
-    });
-  } catch (error) {
-    console.error("Failed to update session progress:", error);
+function calculateExpiresAt(expiresField: string, from: Date): Date {
+  const now = from || new Date();
+
+  switch (expiresField) {
+    case "1h":
+      return new Date(now.getTime() + 1 * 60 * 60 * 1000);
+    case "1d":
+      return computeExpiresAt(now, 1);
+    case "7d":
+      return computeExpiresAt(now, 7);
+    case "30d":
+      return computeExpiresAt(now, 30);
+    default:
+      return computeExpiresAt(now, 7);
   }
 }
 
@@ -167,7 +130,6 @@ async function processMultipartUpload(
   file: any,
   fileBuffer: Buffer,
   key: string,
-  sse: any,
   domain: string,
 ) {
   const r2 = getR2Client();
@@ -175,17 +137,14 @@ async function processMultipartUpload(
 
   if (!r2 || !bucket) throw new Error("R2 not configured");
 
-  const CHUNK_SIZE = 5 * 1024 * 1024;
+  const CHUNK_SIZE = 8 * 1024 * 1024;
   const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
-
-  console.log("Starting multipart upload, chunks:", totalChunks);
 
   const createRes = await r2.send(
     new CreateMultipartUploadCommand({
       Bucket: bucket,
       Key: key,
       ContentType: file.type,
-      ...(sse ? { ServerSideEncryption: sse } : {}),
     }),
   );
 
@@ -193,34 +152,40 @@ async function processMultipartUpload(
   const parts: Array<{ ETag?: string; PartNumber: number }> = [];
 
   try {
-    await updateSessionProgress(sessionId, 15);
-    await reportProgress(sessionId, 15);
+    await reportProgress(sessionId, 40);
+
+    const uploadPromises = [];
 
     for (let partNumber = 1; partNumber <= totalChunks; partNumber++) {
       const start = (partNumber - 1) * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, fileBuffer.length);
       const chunk = fileBuffer.subarray(start, end);
 
-      console.log(`Uploading part ${partNumber}/${totalChunks}`);
-      const { ETag } = await r2.send(
-        new UploadPartCommand({
-          Bucket: bucket,
-          Key: key,
-          UploadId: multipartUploadId,
-          PartNumber: partNumber,
-          Body: chunk,
-        }),
+      uploadPromises.push(
+        r2
+          .send(
+            new UploadPartCommand({
+              Bucket: bucket,
+              Key: key,
+              UploadId: multipartUploadId,
+              PartNumber: partNumber,
+              Body: chunk,
+            }),
+          )
+          .then(({ ETag }) => {
+            parts.push({ ETag, PartNumber: partNumber });
+
+            if (partNumber % Math.max(1, Math.floor(totalChunks / 5)) === 0) {
+              const progress = Math.round((partNumber / totalChunks) * 50) + 40;
+              return reportProgress(sessionId, progress);
+            }
+          }),
       );
-
-      parts.push({ ETag, PartNumber: partNumber });
-
-      const progress = Math.round((partNumber / totalChunks) * 75) + 15;
-      await updateSessionProgress(sessionId, progress);
-      await reportProgress(sessionId, progress);
     }
 
-    await updateSessionProgress(sessionId, 95);
+    await Promise.all(uploadPromises);
     await reportProgress(sessionId, 95);
+
     parts.sort((a, b) => a.PartNumber - b.PartNumber);
 
     await r2.send(
@@ -247,15 +212,12 @@ async function processMultipartUpload(
       completed: true,
     };
 
-    console.log("Multipart upload completed");
-    await updateSessionProgress(sessionId, 100);
     await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
-    
+
     return finalResult;
   } catch (e) {
     console.error("Multipart upload failed:", e);
-    await updateSessionProgress(sessionId, -1, "Multipart upload failed");
     await reportProgress(sessionId, -1);
     try {
       await r2.send(

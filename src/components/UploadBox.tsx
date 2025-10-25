@@ -22,6 +22,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { usePusherChannel } from "@/hooks/usePusherChannel";
+import { useUploadSession } from "@/hooks/useUploadSession";
 
 export type UploadBoxProps = {
   accept?: string;
@@ -44,8 +45,8 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
 
+  const { saveSession, getSession } = useUploadSession();
   const effectiveAccept = accept ?? defaultAccept;
-
   const channelName = currentSessionId ? `upload-${currentSessionId}` : null;
   const { channel } = usePusherChannel(channelName);
 
@@ -67,19 +68,32 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setFinalUrl(null);
   };
 
-  // Polling fallback
   useEffect(() => {
     if (!currentSessionId || !isUploading) return;
 
+    let pollCount = 0;
+    const maxPolls = 120;
+
     const pollInterval = setInterval(async () => {
+      pollCount++;
+
+      if (pollCount >= maxPolls) {
+        setUploadStatus("Upload timeout");
+        setIsUploading(false);
+        toast.error("Upload took too long, please try again");
+        clearInterval(pollInterval);
+        return;
+      }
+
       try {
-        const response = await fetch(`/api/upload?sessionId=${currentSessionId}`);
+        const response = await fetch(
+          `/api/upload?sessionId=${currentSessionId}`,
+        );
         if (!response.ok) return;
-        
+
         const data = await response.json();
-        console.log("Polling response:", data);
-        
-        if (data.status === 'completed' && data.result) {
+
+        if (data.status === "completed" && data.result) {
           setFinalUrl(data.result.publicUrl);
           setProgress(100);
           setUploadStatus("Upload completed!");
@@ -90,17 +104,20 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           setTimeout(() => {
             resetUploadState();
           }, 3000);
-        } else if (data.status === 'failed') {
+        } else if (data.status === "failed") {
           setUploadStatus("Upload failed");
           setIsUploading(false);
           toast.error(data.error || "Upload failed");
           clearInterval(pollInterval);
-        } else if (data.progress !== undefined && data.progress > progress) {
-          setProgress(data.progress);
-          if (data.progress < 10) {
+        } else if (data.progress !== undefined) {
+          if (data.progress > progress) {
+            setProgress(data.progress);
+          }
+
+          if (data.progress < 30) {
             setUploadStatus("Preparing upload...");
           } else if (data.progress < 100) {
-            setUploadStatus(`Uploading... ${data.progress}%`);
+            setUploadStatus(`Uploading...`);
           } else if (data.progress === 100) {
             setUploadStatus("Finalizing...");
           }
@@ -108,17 +125,15 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       } catch (error) {
         console.error("Polling error:", error);
       }
-    }, 2000);
+    }, 500);
 
     return () => clearInterval(pollInterval);
   }, [currentSessionId, isUploading, progress]);
 
-  // Pusher events (primary method)
   useEffect(() => {
     if (!channel) return;
 
     const handleProgress = (data: any) => {
-      console.log("Progress event received:", data);
       const newProgress = data.progress || 0;
       setProgress(newProgress);
 
@@ -136,7 +151,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     };
 
     const handleResult = (data: any) => {
-      console.log("Result event received:", data);
       setFinalUrl(data.publicUrl);
       setProgress(100);
       setUploadStatus("Upload completed!");
@@ -149,7 +163,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     };
 
     const handleError = (data: any) => {
-      console.log("Error event received:", data);
       setUploadStatus("Upload failed");
       setIsUploading(false);
       toast.error(data.error);
@@ -199,30 +212,68 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       setProgress(0);
       setUploadStatus("Starting upload...");
 
+      const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      saveSession({
+        id: sessionId,
+        status: "processing",
+        progress: 0,
+        filename: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        expiresField: expiresOption,
+        domain: selectedDomain,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
       const formData = new FormData();
       formData.append("file", file);
       formData.append("expires", expiresOption);
       formData.append("domain", selectedDomain);
 
-      console.log("Sending upload request to API...");
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
-      console.log("API response status:", response.status);
-      
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error ${response.status}`);
       }
 
       const data = await response.json();
-      console.log("API response data:", data);
 
       if (data.sessionId) {
         setCurrentSessionId(data.sessionId);
         setUploadStatus("Upload started...");
+
+        if (data.status === "completed" && data.result) {
+          setFinalUrl(data.result.publicUrl);
+          setProgress(100);
+          setUploadStatus("Upload completed!");
+          setIsUploading(false);
+          toast.success("Upload completed successfully.");
+
+          saveSession({
+            id: data.sessionId,
+            status: "completed",
+            progress: 100,
+            filename: file.name,
+            fileType: file.type,
+            fileSize: file.size,
+            expiresField: expiresOption,
+            domain: selectedDomain,
+            result: data.result,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+          });
+
+          setTimeout(() => {
+            resetUploadState();
+          }, 3000);
+        }
       } else {
         throw new Error("No session ID received");
       }

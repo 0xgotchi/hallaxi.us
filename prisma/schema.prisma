@@ -17,19 +17,3 @@ model Upload {
   r2Key      String
   domain     String
 }
-
-model UploadSession {
-  id           String   @id
-  status       String
-  progress     Int
-  filename     String
-  fileType     String
-  fileSize     Int
-  expiresField String
-  domain       String
-  error        String?
-  result       String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  completedAt  DateTime?
-}
