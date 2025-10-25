@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -30,6 +32,14 @@ export async function POST(req: NextRequest) {
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
     const r2 = getR2Client();
+    if (!r2) {
+      console.error("R2 client not initialized");
+      return NextResponse.json(
+        { error: "R2 client not initialized" },
+        { status: 500 },
+      );
+    }
+
     const bucket = process.env.R2_BUCKET || "";
     if (!bucket)
       return NextResponse.json(
@@ -203,7 +213,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(responsePayload, { status: 201 });
   } catch (err: unknown) {
-    console.error("Upload error:", err);
+    console.error("Upload error:", JSON.stringify(err, null, 2));
+
     let message = "Upload failed";
     if (err && typeof err === "object") {
       const e = err as { name?: unknown; Code?: unknown };
@@ -211,6 +222,7 @@ export async function POST(req: NextRequest) {
         message = "Access denied to R2 bucket. Check keys and permissions.";
       }
     }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
