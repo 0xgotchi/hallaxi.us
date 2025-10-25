@@ -6,6 +6,8 @@ CREATE TABLE "Upload" (
     "filename" TEXT NOT NULL,
     "url" TEXT NOT NULL,
     "type" TEXT NOT NULL,
+    "r2Key" TEXT NOT NULL,
+    "domain" TEXT NOT NULL,
 
     CONSTRAINT "Upload_pkey" PRIMARY KEY ("id")
 );

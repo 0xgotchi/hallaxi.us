@@ -1,11 +1,9 @@
 import AnimatedPage, { FadeInUp } from "@/components/AnimatedPage";
-import { Navbar } from "@/components/Navbar";
 import UploadBox from "@/components/UploadBox";
 
 export default function Home() {
   return (
     <>
-      <Navbar hidden />
       <AnimatedPage>
         <FadeInUp>
           <main>

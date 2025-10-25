@@ -1,18 +1,25 @@
 import "./globals.css";
-import { ToastProvider } from "@/components/Toast";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { fontClassName } from "@/config/fonts";
 
-export { metadata } from "@/config/metadata";
+export { metadata, viewport } from "@/config/metadata";
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="cursor-default select-none">
       <body className={fontClassName}>
-        <ToastProvider>{children}</ToastProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+        <Toaster />
       </body>
     </html>
   );

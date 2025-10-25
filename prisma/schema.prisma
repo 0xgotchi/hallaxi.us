@@ -14,5 +14,6 @@ model Upload {
   filename   String
   url        String   @unique
   type       String
-  r2Key      String?
+  r2Key      String
+  domain     String
 }

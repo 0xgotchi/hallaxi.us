@@ -97,7 +97,6 @@ export const uploadConfig: UploadConstraints = {
 };
 
 export const accept = uploadConfig.allowedExtensions.join(",");
-
 export const defaultExpiresDays = 7;
 
 export function computeExpiresAt(
@@ -129,14 +128,8 @@ export function validateFile(
   const typeOk =
     cfg.allowedMimeTypes.includes(file.type) ||
     cfg.allowedExtensions.includes(ext);
-  if (!typeOk) {
-    return { valid: false, error: "File type not allowed." };
-  }
-  if (file.size > cfg.maxFileSizeBytes) {
-    return {
-      valid: false,
-      error: "File exceeds the maximum allowed size.",
-    };
-  }
+  if (!typeOk) return { valid: false, error: "File type not allowed." };
+  if (file.size > cfg.maxFileSizeBytes)
+    return { valid: false, error: "File exceeds the maximum allowed size." };
   return { valid: true };
 }

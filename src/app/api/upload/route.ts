@@ -6,23 +6,21 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload as S3Upload } from "@aws-sdk/lib-storage";
 import { type NextRequest, NextResponse } from "next/server";
+import { allowedDomains, buildPublicUrl } from "@/config/domain";
 import { computeExpiresAt, validateFile } from "@/config/upload";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
+import { generateSlug, generateSnowflakeIdFor } from "@/lib/utils";
 
-function generateSlug(length = 6) {
-  const chars =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let res = "";
-  for (let i = 0; i < length; i++)
-    res += chars[Math.floor(Math.random() * chars.length)];
-  return res;
-}
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
+    const expiresField = String(formData.get("expires") ?? "7d");
+    const submittedDomain = String(formData.get("domain") ?? "");
+
     if (!(file instanceof File)) {
       return NextResponse.json(
         { error: "File not provided (field 'file')" },
@@ -31,21 +29,70 @@ export async function POST(req: NextRequest) {
     }
 
     const { valid, error } = validateFile(file);
-    if (!valid) {
-      return NextResponse.json({ error }, { status: 400 });
-    }
+    if (!valid) return NextResponse.json({ error }, { status: 400 });
 
     const r2 = getR2Client();
     const bucket = process.env.R2_BUCKET || "";
-    if (!bucket) {
+    if (!bucket)
       return NextResponse.json(
         { error: "R2_BUCKET not configured" },
         { status: 500 },
       );
+
+    const host = req.headers.get("host") ?? "";
+    const domain = allowedDomains.includes(submittedDomain as any)
+      ? submittedDomain
+      : allowedDomains.includes(host as any)
+        ? host
+        : allowedDomains[0];
+
+    let slug = generateSlug();
+    for (let i = 0; i < 5; i++) {
+      const exists = await prisma.upload.findUnique({ where: { url: slug } });
+      if (!exists) break;
+      slug = generateSlug();
     }
 
-    const key = `${Date.now()}-${crypto.randomUUID()}-${file.name}`;
+    const now = new Date();
+    let expiresAt: Date;
+    if (expiresField === "1h")
+      expiresAt = new Date(now.getTime() + 1 * 60 * 60 * 1000);
+    else if (expiresField === "1d") expiresAt = computeExpiresAt(now, 1);
+    else if (expiresField === "7d") expiresAt = computeExpiresAt(now, 7);
+    else if (expiresField === "30d") expiresAt = computeExpiresAt(now, 30);
+    else expiresAt = computeExpiresAt(now, 7);
 
+    const maxAttempts = 5;
+    let created: any = null;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const generatedId = generateSnowflakeIdFor(
+        `${file.name}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      );
+      try {
+        created = await prisma.upload.create({
+          data: {
+            id: generatedId,
+            filename: file.name,
+            type: file.type,
+            url: slug,
+            uploadAt: now,
+            expiresAt,
+            domain,
+            r2Key: "",
+          },
+        });
+        break;
+      } catch (e: unknown) {
+        const isUniqueConstraint =
+          e && typeof e === "object" && (e as any).code === "P2002";
+        if (isUniqueConstraint && attempt < maxAttempts - 1) continue;
+        throw e;
+      }
+    }
+
+    const id = created.id;
+    const key = `${id}/${file.name}`;
     const isLarge = file.size > 500 * 1024 * 1024;
 
     if (isLarge) {
@@ -145,33 +192,15 @@ export async function POST(req: NextRequest) {
       await uploader.done();
     }
 
-    let slug = generateSlug(6);
-    for (let i = 0; i < 5; i++) {
-      const exists = await prisma.upload.findUnique({ where: { url: slug } });
-      if (!exists) break;
-      slug = generateSlug(6);
-    }
+    await prisma.upload.update({ where: { id }, data: { r2Key: key, domain } });
 
-    const expiresAt = computeExpiresAt(new Date());
-
-    await prisma.upload.create({
-      data: {
-        filename: file.name,
-        type: file.type,
-        url: slug,
-        uploadAt: new Date(),
-        expiresAt,
-        r2Key: key,
-      },
-    });
-
-    const publicBase = process.env.R2_PUBLIC_BASE_URL || "";
     const responsePayload = {
+      slug,
       filename: file.name,
       size: file.size,
       type: file.type,
       url: `/${slug}`,
-      publicUrl: publicBase ? `${publicBase}/${key}` : null,
+      publicUrl: buildPublicUrl(slug, domain),
     };
 
     return NextResponse.json(responsePayload, { status: 201 });
@@ -187,5 +216,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-export const runtime = "nodejs";
