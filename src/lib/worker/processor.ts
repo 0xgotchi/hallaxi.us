@@ -79,12 +79,9 @@ export async function processUploadJob(jobData: any) {
     const sse =
       process.env.R2_FORCE_SSE === "true" ? ("AES256" as const) : undefined;
 
-    console.log(
-      "File size:",
-      file.size,
-      "Using multipart:",
-      file.size > 5 * 1024 * 1024,
-    );
+    console.log("File size:", file.size, "Using multipart:", file.size > 5 * 1024 * 1024);
+
+    let finalResult;
 
     if (file.size <= 5 * 1024 * 1024) {
       console.log("Using single part upload");
@@ -103,7 +100,7 @@ export async function processUploadJob(jobData: any) {
         data: { r2Key: key, domain },
       });
 
-      const finalResult = {
+      finalResult = {
         slug,
         filename: file.name,
         size: file.size,
@@ -118,7 +115,7 @@ export async function processUploadJob(jobData: any) {
       await sendResult(sessionId, finalResult);
     } else {
       console.log("Using multipart upload");
-      await processMultipartUpload(
+      finalResult = await processMultipartUpload(
         sessionId,
         id,
         slug,
@@ -130,7 +127,7 @@ export async function processUploadJob(jobData: any) {
       );
     }
 
-    return { success: true };
+    return finalResult;
   } catch (error) {
     console.error(`Upload failed for ${sessionId}:`, error);
     await sendError(
@@ -228,6 +225,8 @@ async function processMultipartUpload(
     console.log("Multipart upload completed");
     await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
+    
+    return finalResult;
   } catch (e) {
     console.error("Multipart upload failed:", e);
     await reportProgress(sessionId, -1);

@@ -6,6 +6,9 @@ import { validateFile } from "@/config/upload";
 import { processUploadJob } from "@/lib/worker/processor";
 import { reportProgress } from "@/lib/realtime";
 
+// Store upload status in memory (in production, use Redis)
+const uploadStatus = new Map();
+
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -22,16 +25,21 @@ export async function POST(req: NextRequest) {
     const { valid, error } = validateFile(file);
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
-    console.log("Testing Pusher connection for session:", sessionId);
-    await reportProgress(sessionId, 10);
-    console.log("Pusher test completed");
+    // Initialize upload status
+    uploadStatus.set(sessionId, {
+      status: "processing",
+      progress: 0,
+      error: null,
+      result: null
+    });
+
+    await reportProgress(sessionId, 1);
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    console.log("Starting upload job for file:", file.name);
-
-    await processUploadJob({
+    // Start processing but don't wait for it
+    processUploadJob({
       sessionId,
       file: {
         name: file.name,
@@ -41,21 +49,34 @@ export async function POST(req: NextRequest) {
       },
       expiresField,
       submittedDomain,
+    }).then(async (result) => {
+      // Update status on success
+      uploadStatus.set(sessionId, {
+        status: "completed",
+        progress: 100,
+        error: null,
+        result: result
+      });
+    }).catch(async (error) => {
+      // Update status on error
+      uploadStatus.set(sessionId, {
+        status: "failed",
+        progress: -1,
+        error: error.message,
+        result: null
+      });
     });
-
-    console.log("Upload job completed for session:", sessionId);
 
     return NextResponse.json(
       {
-        status: "completed",
+        status: "started",
         sessionId,
-        message: "Upload completed successfully",
+        message: "Upload started successfully",
       },
-      { status: 200 },
+      { status: 202 },
     );
   } catch (err: any) {
     console.error("Upload error:", err);
-    await reportProgress(sessionId, -1);
     return NextResponse.json(
       {
         error: err.message || "Upload failed",
@@ -63,6 +84,24 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+// Add status endpoint for polling
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const sessionId = searchParams.get("sessionId");
+
+  if (!sessionId) {
+    return NextResponse.json({ error: "Session ID required" }, { status: 400 });
+  }
+
+  const status = uploadStatus.get(sessionId) || {
+    status: "unknown",
+    progress: 0,
+    error: "Session not found"
+  };
+
+  return NextResponse.json(status);
 }
 
 export async function OPTIONS() {

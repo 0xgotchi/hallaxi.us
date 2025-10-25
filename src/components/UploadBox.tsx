@@ -67,10 +67,54 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setFinalUrl(null);
   };
 
+  // Polling fallback
+  useEffect(() => {
+    if (!currentSessionId || !isUploading) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/upload?sessionId=${currentSessionId}`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        if (data.status === 'completed' && data.result) {
+          setFinalUrl(data.result.publicUrl);
+          setProgress(100);
+          setUploadStatus("Upload completed!");
+          setIsUploading(false);
+          toast.success("Upload completed successfully.");
+          clearInterval(pollInterval);
+
+          setTimeout(() => {
+            resetUploadState();
+          }, 3000);
+        } else if (data.status === 'failed') {
+          setUploadStatus("Upload failed");
+          setIsUploading(false);
+          toast.error(data.error);
+          clearInterval(pollInterval);
+        } else if (data.progress && data.progress > progress) {
+          setProgress(data.progress);
+          if (data.progress < 10) {
+            setUploadStatus("Preparing upload...");
+          } else if (data.progress < 100) {
+            setUploadStatus(`Uploading... ${data.progress}%`);
+          } else if (data.progress === 100) {
+            setUploadStatus("Finalizing...");
+          }
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [currentSessionId, isUploading, progress]);
+
+  // Pusher events (primary method)
   useEffect(() => {
     if (!channel) return;
-
-    console.log("Pusher channel available, setting up listeners");
 
     const handleProgress = (data: any) => {
       console.log("Progress event received:", data);
@@ -166,7 +210,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       });
 
       console.log("API response status:", response.status);
-
+      
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error ${response.status}`);
