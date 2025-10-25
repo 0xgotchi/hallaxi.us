@@ -1,6 +1,7 @@
 export const allowedDomains = [
   "hallaxi.us",
   "antisemita.lol",
+  "radius-usually-detailed-chris.trycloudflare.com",
 ] as const;
 
 export type AllowedDomain = (typeof allowedDomains)[number];

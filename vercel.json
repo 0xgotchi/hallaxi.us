@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "functions": {
+    "src/app/api/upload/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/upload/progress/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/worker/status/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    }
+  ]
+}

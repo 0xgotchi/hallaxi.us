@@ -125,7 +125,7 @@ export const uploadConfig: UploadConstraints = {
     "application/vnd.android.package-archive",
     "application/octet-stream",
   ],
-  maxFileSizeBytes: 500 * 1024 * 1024, // 500MB
+  maxFileSizeBytes: 500 * 1024 * 1024,
 };
 
 export const accept = uploadConfig.allowedExtensions.join(",");
@@ -160,7 +160,6 @@ export function validateFile(
   file: File,
   cfg: UploadConstraints = uploadConfig,
 ): { valid: boolean; error?: string } {
-  // Verificar extensão
   const ext = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
   const typeOk =
     cfg.allowedMimeTypes.includes(file.type) ||
@@ -170,7 +169,6 @@ export function validateFile(
     return { valid: false, error: "File type not allowed." };
   }
 
-  // Verificar tamanho
   if (file.size > cfg.maxFileSizeBytes) {
     return {
       valid: false,

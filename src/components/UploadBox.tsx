@@ -81,7 +81,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       } else if (newProgress < 10) {
         setUploadStatus("Preparing upload...");
       } else if (newProgress < 100) {
-        setUploadStatus(`Uploading...`);
+        setUploadStatus(`Uploading... ${newProgress}%`);
       } else if (newProgress === 100) {
         setUploadStatus("Finalizing...");
       }
@@ -96,7 +96,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
       setTimeout(() => {
         resetUploadState();
-      });
+      }, 3000);
     };
 
     const handleError = (data: any) => {
@@ -115,43 +115,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       channel.unbind("error", handleError);
     };
   }, [channel]);
-
-  const recoverProgress = async (sessionId: string) => {
-    try {
-      const response = await fetch("/api/upload/progress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-
-        if (data.hasResult && data.result) {
-          setFinalUrl(data.result.publicUrl);
-          setProgress(100);
-          setUploadStatus("Upload completed!");
-          setIsUploading(false);
-          toast.success("Upload completed successfully.");
-
-          setTimeout(() => {
-            resetUploadState();
-          }, 3000);
-        } else if (data.progress > 0 && data.progress < 100) {
-          setProgress(data.progress);
-          setUploadStatus(`Uploading...`);
-        }
-      }
-    } catch (error) {
-      console.error("Progress recovery failed:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (currentSessionId && isUploading) {
-      recoverProgress(currentSessionId);
-    }
-  }, [currentSessionId, isUploading]);
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const files = e.target.files;
