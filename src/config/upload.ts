@@ -66,7 +66,7 @@ export const uploadConfig: UploadConstraints = {
     ".iso",
     ".jar",
     ".war",
-    ".apk"
+    ".apk",
   ],
   allowedMimeTypes: [
     "image/png",
@@ -123,49 +123,61 @@ export const uploadConfig: UploadConstraints = {
     "application/x-iso9660-image",
     "application/java-archive",
     "application/vnd.android.package-archive",
-    "application/octet-stream"
+    "application/octet-stream",
   ],
-  maxFileSizeBytes: 500 * 1024 * 1024
+  maxFileSizeBytes: 500 * 1024 * 1024, // 500MB
 };
 
 export const accept = uploadConfig.allowedExtensions.join(",");
 export const defaultExpiresDays = 7;
 
-export function computeExpiresAt(from: Date = new Date(), days = defaultExpiresDays) {
+export function computeExpiresAt(
+  from: Date = new Date(),
+  days = defaultExpiresDays,
+) {
   const d = new Date(from);
   d.setDate(d.getDate() + days);
   return d;
 }
 
 export function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+
   const units = ["B", "KB", "MB", "GB", "TB"] as const;
   let size = bytes;
   let i = 0;
+
   while (size >= 1024 && i < units.length - 1) {
     size /= 1024;
     i++;
   }
+
   const precision = size >= 100 ? 0 : size >= 10 ? 1 : 2;
-  return `${size.toFixed(precision)}${units[i]}`;
+  return `${size.toFixed(precision)} ${units[i]}`;
 }
 
 export function validateFile(
   file: File,
   cfg: UploadConstraints = uploadConfig,
 ): { valid: boolean; error?: string } {
+  // Verificar extensão
   const ext = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
   const typeOk =
     cfg.allowedMimeTypes.includes(file.type) ||
     cfg.allowedExtensions.includes(ext);
+
   if (!typeOk) {
     return { valid: false, error: "File type not allowed." };
   }
+
+  // Verificar tamanho
   if (file.size > cfg.maxFileSizeBytes) {
     return {
       valid: false,
-      error: "File exceeds the maximum allowed size.",
+      error: `File exceeds maximum size of ${formatBytes(cfg.maxFileSizeBytes)}.`,
     };
   }
+
   return { valid: true };
 }
 
@@ -188,7 +200,7 @@ export function isArchiveFile(file: File): boolean {
     ".iso",
     ".jar",
     ".war",
-    ".apk"
+    ".apk",
   ];
   const archiveMimes = [
     "application/zip",
@@ -204,9 +216,10 @@ export function isArchiveFile(file: File): boolean {
     "application/x-iso9660-image",
     "application/java-archive",
     "application/vnd.android.package-archive",
-    "application/octet-stream"
+    "application/octet-stream",
   ];
+
   const name = file.name.toLowerCase();
-  const extMatches = archiveExts.some(ext => name.endsWith(ext));
+  const extMatches = archiveExts.some((ext) => name.endsWith(ext));
   return extMatches || archiveMimes.includes(file.type);
 }

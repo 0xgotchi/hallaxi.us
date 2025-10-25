@@ -1,10 +1,11 @@
 "use client";
 
 import { Check, Clock, Copy } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { FadeInUp } from "@/components/AnimatedPage";
 import { toast } from "sonner";
 import { accept as defaultAccept, formatBytes, validateFile } from "@/config/upload";
@@ -27,6 +28,8 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const [expiresOption, setExpiresOption] = useState("7d");
   const [copied, setCopied] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<AllowedDomain>(allowedDomains[0]);
+  const [uploadStatus, setUploadStatus] = useState<string>("");
+  const [currentUploadId, setCurrentUploadId] = useState<string>("");
 
   const effectiveAccept = accept ?? defaultAccept;
 
@@ -36,8 +39,46 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setTitleText("Click here to select a file");
     setFileInfo("Maximum file size: 500MB");
     setError(null);
+    setProgress(0);
+    setUploadStatus("");
+    setCurrentUploadId("");
     if (inputRef.current) inputRef.current.value = "";
   };
+
+  useEffect(() => {
+    if (!currentUploadId || !isUploading) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch("/api/upload/progress", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ uploadId: currentUploadId }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const newProgress = data.progress || 0;
+          
+          setProgress(newProgress);
+          
+          if (newProgress < 10) {
+            setUploadStatus("Preparing upload...");
+          } else if (newProgress < 100) {
+            setUploadStatus(`Uploading... ${newProgress}%`);
+          } else {
+            setUploadStatus("Finalizing...");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch progress:", error);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [currentUploadId, isUploading]);
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const files = e.target.files;
@@ -59,6 +100,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setError(null);
     setTitleText(f.name);
     setFileInfo(formatBytes(f.size));
+    setUploadStatus("Starting upload...");
 
     onFilesSelected?.(files);
     void uploadFile(f);
@@ -66,62 +108,69 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   };
 
   const uploadFile = async (file: File) => {
+    let uploadId = "";
+    
     try {
       setIsUploading(true);
       setProgress(0);
+      setUploadStatus("Starting upload...");
 
       const form = new FormData();
       form.append("file", file);
       form.append("expires", expiresOption);
       form.append("domain", selectedDomain);
 
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/upload");
+      const tempUploadId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      setCurrentUploadId(tempUploadId);
+      uploadId = tempUploadId;
 
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) {
-            setProgress(Math.round((ev.loaded / ev.total) * 100));
-          }
-        };
-
-        xhr.onreadystatechange = () => {
-          if (xhr.readyState !== XMLHttpRequest.DONE) return;
-
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const data = JSON.parse(xhr.responseText);
-              const slug = data?.slug ?? null;
-              if (!slug) throw new Error("Invalid server response");
-
-              const link = buildPublicUrl(slug, selectedDomain);
-              setFinalUrl(link);
-              setProgress(100);
-              toast.success("Upload completed successfully.");
-
-              setTimeout(() => resetInputOnly());
-
-              resolve();
-            } catch (e) {
-              reject(e);
-            }
-          } else {
-            try {
-              const err = JSON.parse(xhr.responseText)?.error ?? `HTTP error ${xhr.status}`;
-              reject(new Error(err));
-            } catch (_) {
-              reject(new Error(`HTTP error ${xhr.status}`));
-            }
-          }
-        };
-
-        xhr.onerror = () => reject(new Error("Network failure during upload"));
-        xhr.send(form);
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: form,
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error ${response.status}`);
+      }
+
+      const data = await response.json();
+      const slug = data?.slug;
+      const serverUploadId = data?.uploadId;
+      
+      if (!slug) throw new Error("Invalid server response");
+
+      if (serverUploadId && serverUploadId !== uploadId) {
+        setCurrentUploadId(serverUploadId);
+        uploadId = serverUploadId;
+      }
+
+      const link = buildPublicUrl(slug, selectedDomain);
+      setFinalUrl(link);
+      setProgress(100);
+      setUploadStatus("Upload completed!");
+      toast.success("Upload completed successfully.");
+
+      setTimeout(() => resetInputOnly());
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
+      setUploadStatus("Upload failed");
       toast.error(msg);
+      
+      if (uploadId) {
+        try {
+          await fetch("/api/upload/progress", {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ uploadId }),
+          });
+        } catch (error) {
+          console.error("Failed to cleanup progress:", error);
+        }
+      }
     } finally {
       setIsUploading(false);
     }
@@ -191,23 +240,15 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
       <div className="mt-6">
         {isUploading ? (
-          <div className="flex items-center gap-3">
-            <div
-              className="relative h-[9px] w-full rounded-full border border-neutral-200/20 bg-transparent overflow-hidden"
-              role="progressbar"
-              aria-valuenow={progress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Upload progress"
-            >
-              <div
-                className="absolute left-0 top-0 h-full bg-white transition-[width] duration-300"
-                style={{ width: `${progress}%` }}
-              />
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between text-sm text-neutral-200/60">
+              <span>{uploadStatus}</span>
+              <span>{progress}%</span>
             </div>
-            <div className="text-xs text-neutral-200/60 w-10 text-right">
-              {progress}%
-            </div>
+            <Progress 
+              value={progress} 
+              className="h-2 bg-neutral-800"
+            />
           </div>
         ) : finalUrl ? (
           <FadeInUp>
