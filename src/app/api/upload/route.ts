@@ -12,7 +12,7 @@ import { allowedDomains, buildPublicUrl } from "@/config/domain";
 import { computeExpiresAt, validateFile } from "@/config/upload";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
-import { generateSlug, generateSnowflakeIdFor } from "@/lib/utils";
+import { generateSlug, generateSnowflakeId } from "@/lib/utils";
 
 export async function POST(req: NextRequest) {
   try {
@@ -74,9 +74,7 @@ export async function POST(req: NextRequest) {
     let created: any = null;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const generatedId = generateSnowflakeIdFor(
-        `${file.name}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      );
+      const generatedId = generateSnowflakeId();
       try {
         created = await prisma.upload.create({
           data: {

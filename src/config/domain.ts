@@ -1,5 +1,6 @@
 export const allowedDomains = [
   "hallaxi.us",
+  "potter-elegant-animals-teach.trycloudflare.com",
   "antisemita.lol",
 ] as const;
 
