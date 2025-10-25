@@ -2,13 +2,8 @@
   "version": 2,
   "functions": {
     "src/app/api/upload/route.ts": {
-      "maxDuration": 300
-    },
-    "src/app/api/upload/progress/route.ts": {
-      "maxDuration": 30
-    },
-    "src/app/api/worker/status/route.ts": {
-      "maxDuration": 30
+      "maxDuration": 300,
+      "memory": 3008
     }
   },
   "headers": [
