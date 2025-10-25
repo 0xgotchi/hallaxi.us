@@ -5,9 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateFile } from "@/config/upload";
 import { processUploadJob } from "@/lib/worker/processor";
 import { reportProgress } from "@/lib/realtime";
-
-// Store upload status in memory (in production, use Redis)
-const uploadStatus = new Map();
+import prisma from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -25,12 +23,19 @@ export async function POST(req: NextRequest) {
     const { valid, error } = validateFile(file);
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
-    // Initialize upload status
-    uploadStatus.set(sessionId, {
-      status: "processing",
-      progress: 0,
-      error: null,
-      result: null
+    // Create upload session in database
+    await prisma.uploadSession.create({
+      data: {
+        id: sessionId,
+        status: "processing",
+        progress: 0,
+        filename: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        expiresField,
+        domain: submittedDomain,
+        createdAt: new Date(),
+      },
     });
 
     await reportProgress(sessionId, 1);
@@ -51,19 +56,25 @@ export async function POST(req: NextRequest) {
       submittedDomain,
     }).then(async (result) => {
       // Update status on success
-      uploadStatus.set(sessionId, {
-        status: "completed",
-        progress: 100,
-        error: null,
-        result: result
+      await prisma.uploadSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "completed",
+          progress: 100,
+          result: JSON.stringify(result),
+          completedAt: new Date(),
+        },
       });
     }).catch(async (error) => {
       // Update status on error
-      uploadStatus.set(sessionId, {
-        status: "failed",
-        progress: -1,
-        error: error.message,
-        result: null
+      await prisma.uploadSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "failed",
+          progress: -1,
+          error: error.message,
+          completedAt: new Date(),
+        },
       });
     });
 
@@ -95,13 +106,41 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Session ID required" }, { status: 400 });
   }
 
-  const status = uploadStatus.get(sessionId) || {
-    status: "unknown",
-    progress: 0,
-    error: "Session not found"
-  };
+  try {
+    const session = await prisma.uploadSession.findUnique({
+      where: { id: sessionId },
+    });
 
-  return NextResponse.json(status);
+    if (!session) {
+      return NextResponse.json({ 
+        status: "unknown", 
+        progress: 0, 
+        error: "Session not found" 
+      }, { status: 404 });
+    }
+
+    const response: any = {
+      status: session.status,
+      progress: session.progress,
+    };
+
+    if (session.error) {
+      response.error = session.error;
+    }
+
+    if (session.result) {
+      response.result = JSON.parse(session.result);
+    }
+
+    return NextResponse.json(response);
+  } catch (error) {
+    console.error("Error fetching upload status:", error);
+    return NextResponse.json({ 
+      status: "error", 
+      progress: 0, 
+      error: "Failed to fetch status" 
+    }, { status: 500 });
+  }
 }
 
 export async function OPTIONS() {

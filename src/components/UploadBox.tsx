@@ -77,6 +77,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         if (!response.ok) return;
         
         const data = await response.json();
+        console.log("Polling response:", data);
         
         if (data.status === 'completed' && data.result) {
           setFinalUrl(data.result.publicUrl);
@@ -92,9 +93,9 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         } else if (data.status === 'failed') {
           setUploadStatus("Upload failed");
           setIsUploading(false);
-          toast.error(data.error);
+          toast.error(data.error || "Upload failed");
           clearInterval(pollInterval);
-        } else if (data.progress && data.progress > progress) {
+        } else if (data.progress !== undefined && data.progress > progress) {
           setProgress(data.progress);
           if (data.progress < 10) {
             setUploadStatus("Preparing upload...");

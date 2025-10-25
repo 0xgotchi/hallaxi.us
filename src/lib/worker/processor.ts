@@ -17,6 +17,9 @@ export async function processUploadJob(jobData: any) {
 
   try {
     console.log("ProcessUploadJob started for session:", sessionId);
+    
+    // Update progress in database
+    await updateSessionProgress(sessionId, 5);
     await reportProgress(sessionId, 5);
 
     const r2 = getR2Client();
@@ -72,6 +75,7 @@ export async function processUploadJob(jobData: any) {
     if (!id) throw new Error("Failed to create upload record");
 
     console.log("Database record created, ID:", id);
+    await updateSessionProgress(sessionId, 10);
     await reportProgress(sessionId, 10);
 
     const fileBuffer = Buffer.from(file.buffer, "base64");
@@ -111,6 +115,7 @@ export async function processUploadJob(jobData: any) {
       };
 
       console.log("Single part upload completed");
+      await updateSessionProgress(sessionId, 100);
       await reportProgress(sessionId, 100);
       await sendResult(sessionId, finalResult);
     } else {
@@ -130,11 +135,28 @@ export async function processUploadJob(jobData: any) {
     return finalResult;
   } catch (error) {
     console.error(`Upload failed for ${sessionId}:`, error);
+    await updateSessionProgress(sessionId, -1, error instanceof Error ? error.message : "Upload failed");
     await sendError(
       sessionId,
       error instanceof Error ? error.message : "Upload failed",
     );
     throw error;
+  }
+}
+
+async function updateSessionProgress(sessionId: string, progress: number, error?: string) {
+  try {
+    await prisma.uploadSession.update({
+      where: { id: sessionId },
+      data: {
+        progress,
+        ...(error && { error, status: "failed" }),
+        ...(progress === 100 && { status: "completed" }),
+        ...(progress === -1 && { status: "failed" }),
+      },
+    });
+  } catch (error) {
+    console.error("Failed to update session progress:", error);
   }
 }
 
@@ -171,6 +193,7 @@ async function processMultipartUpload(
   const parts: Array<{ ETag?: string; PartNumber: number }> = [];
 
   try {
+    await updateSessionProgress(sessionId, 15);
     await reportProgress(sessionId, 15);
 
     for (let partNumber = 1; partNumber <= totalChunks; partNumber++) {
@@ -192,9 +215,11 @@ async function processMultipartUpload(
       parts.push({ ETag, PartNumber: partNumber });
 
       const progress = Math.round((partNumber / totalChunks) * 75) + 15;
+      await updateSessionProgress(sessionId, progress);
       await reportProgress(sessionId, progress);
     }
 
+    await updateSessionProgress(sessionId, 95);
     await reportProgress(sessionId, 95);
     parts.sort((a, b) => a.PartNumber - b.PartNumber);
 
@@ -223,12 +248,14 @@ async function processMultipartUpload(
     };
 
     console.log("Multipart upload completed");
+    await updateSessionProgress(sessionId, 100);
     await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
     
     return finalResult;
   } catch (e) {
     console.error("Multipart upload failed:", e);
+    await updateSessionProgress(sessionId, -1, "Multipart upload failed");
     await reportProgress(sessionId, -1);
     try {
       await r2.send(
