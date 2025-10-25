@@ -43,17 +43,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   );
   const [uploadStatus, setUploadStatus] = useState<string>("");
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
-  const [isClient, setIsClient] = useState(false);
 
   const effectiveAccept = accept ?? defaultAccept;
 
-  const channelName =
-    isClient && currentSessionId ? `upload-${currentSessionId}` : null;
+  const channelName = currentSessionId ? `upload-${currentSessionId}` : null;
   const { channel } = usePusherChannel(channelName);
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
 
   const handleClick = () => inputRef.current?.click();
 
@@ -145,7 +139,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           }, 3000);
         } else if (data.progress > 0 && data.progress < 100) {
           setProgress(data.progress);
-          setUploadStatus(`Uploading... ${data.progress}%`);
+          setUploadStatus(`Uploading...`);
         }
       }
     } catch (error) {
@@ -223,43 +217,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       setIsUploading(false);
     }
   };
-
-  if (!isClient) {
-    return (
-      <div className="w-full max-w-4xl mx-auto">
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 text-xs md:text-sm text-neutral-200/60 mb-2">
-              <Clock className="h-4 w-4" />
-              <span>Expires</span>
-            </div>
-            <div className="animate-pulse">
-              <div className="h-10 bg-gray-700 rounded-lg w-48"></div>
-            </div>
-          </div>
-
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 text-xs md:text-sm text-neutral-200/60 mb-2">
-              <Globe className="h-4 w-4" />
-              <span>Domain</span>
-            </div>
-            <div className="animate-pulse">
-              <div className="h-10 bg-gray-700 rounded-lg w-64"></div>
-            </div>
-          </div>
-        </div>
-
-        <div className="animate-pulse">
-          <div className="w-full border-2 border-dashed border-primary/20 rounded-2xl p-20 md:p-24 text-center bg-transparent">
-            <div className="flex flex-col items-center gap-2">
-              <div className="h-6 bg-gray-700 rounded w-64 mb-2"></div>
-              <div className="h-4 bg-gray-700 rounded w-32"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="w-full max-w-4xl mx-auto">
