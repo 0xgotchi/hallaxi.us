@@ -11,16 +11,19 @@ export function generateSlug(): string {
   return nanoid(6);
 }
 
+const SNOWFLAKE_EPOCH = Date.UTC(2025, 9, 25);
+
 let snowflake: Snowflake | null = null;
 
-function getSnowflakeInstance() {
+function getSnowflakeInstance(): Snowflake {
   if (!snowflake) {
-    snowflake = new Snowflake(Date.now());
+    snowflake = new Snowflake(SNOWFLAKE_EPOCH);
   }
   return snowflake;
 }
 
 export function generateSnowflakeId(): string {
-  const id = getSnowflakeInstance().generate();
-  return id.toString().padStart(18, "0").slice(0, 18);
+  const instance = getSnowflakeInstance();
+  const snowflakeId = instance.generate();
+  return snowflakeId.toString().padStart(18, "0").slice(0, 18);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clock, Copy } from "lucide-react";
+import { Check, Clock, Copy, Globe } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,20 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { FadeInUp } from "@/components/AnimatedPage";
 import { toast } from "sonner";
-import { accept as defaultAccept, formatBytes, validateFile } from "@/config/upload";
-import { allowedDomains, AllowedDomain, buildPublicUrl } from "@/config/domain";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import {
+  accept as defaultAccept,
+  formatBytes,
+  validateFile,
+} from "@/config/upload";
+import { allowedDomains, AllowedDomain } from "@/config/domain";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import { usePusherChannel } from "@/hooks/usePusherChannel";
 
 export type UploadBoxProps = {
   accept?: string;
@@ -27,63 +38,125 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const [finalUrl, setFinalUrl] = useState<string | null>(null);
   const [expiresOption, setExpiresOption] = useState("7d");
   const [copied, setCopied] = useState(false);
-  const [selectedDomain, setSelectedDomain] = useState<AllowedDomain>(allowedDomains[0]);
+  const [selectedDomain, setSelectedDomain] = useState<AllowedDomain>(
+    allowedDomains[0],
+  );
   const [uploadStatus, setUploadStatus] = useState<string>("");
-  const [currentUploadId, setCurrentUploadId] = useState<string>("");
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
 
   const effectiveAccept = accept ?? defaultAccept;
 
+  const channelName = currentSessionId ? `upload-${currentSessionId}` : null;
+  const { channel } = usePusherChannel(channelName);
+
   const handleClick = () => inputRef.current?.click();
 
-  const resetInputOnly = () => {
+  const resetUploadState = () => {
     setTitleText("Click here to select a file");
     setFileInfo("Maximum file size: 500MB");
     setError(null);
     setProgress(0);
     setUploadStatus("");
-    setCurrentUploadId("");
+    setCurrentSessionId("");
+    setIsUploading(false);
     if (inputRef.current) inputRef.current.value = "";
   };
 
+  const resetAllState = () => {
+    resetUploadState();
+    setFinalUrl(null);
+  };
+
   useEffect(() => {
-    if (!currentUploadId || !isUploading) return;
+    if (!channel) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch("/api/upload/progress", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ uploadId: currentUploadId }),
-        });
+    const handleProgress = (data: any) => {
+      const newProgress = data.progress || 0;
+      setProgress(newProgress);
 
-        if (response.ok) {
-          const data = await response.json();
-          const newProgress = data.progress || 0;
-          
-          setProgress(newProgress);
-          
-          if (newProgress < 10) {
-            setUploadStatus("Preparing upload...");
-          } else if (newProgress < 100) {
-            setUploadStatus(`Uploading... ${newProgress}%`);
-          } else {
-            setUploadStatus("Finalizing...");
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch progress:", error);
+      if (newProgress === -1) {
+        setUploadStatus("Upload failed");
+        setIsUploading(false);
+        toast.error("Upload failed");
+      } else if (newProgress < 10) {
+        setUploadStatus("Preparing upload...");
+      } else if (newProgress < 100) {
+        setUploadStatus(`Uploading...`);
+      } else if (newProgress === 100) {
+        setUploadStatus("Finalizing...");
       }
-    }, 500);
+    };
 
-    return () => clearInterval(interval);
-  }, [currentUploadId, isUploading]);
+    const handleResult = (data: any) => {
+      setFinalUrl(data.publicUrl);
+      setProgress(100);
+      setUploadStatus("Upload completed!");
+      setIsUploading(false);
+      toast.success("Upload completed successfully.");
+
+      setTimeout(() => {
+        resetUploadState();
+      });
+    };
+
+    const handleError = (data: any) => {
+      setUploadStatus("Upload failed");
+      setIsUploading(false);
+      toast.error(data.error);
+    };
+
+    channel.bind("progress", handleProgress);
+    channel.bind("result", handleResult);
+    channel.bind("error", handleError);
+
+    return () => {
+      channel.unbind("progress", handleProgress);
+      channel.unbind("result", handleResult);
+      channel.unbind("error", handleError);
+    };
+  }, [channel]);
+
+  const recoverProgress = async (sessionId: string) => {
+    try {
+      const response = await fetch("/api/upload/progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (data.hasResult && data.result) {
+          setFinalUrl(data.result.publicUrl);
+          setProgress(100);
+          setUploadStatus("Upload completed!");
+          setIsUploading(false);
+          toast.success("Upload completed successfully.");
+
+          setTimeout(() => {
+            resetUploadState();
+          }, 3000);
+        } else if (data.progress > 0 && data.progress < 100) {
+          setProgress(data.progress);
+          setUploadStatus(`Uploading... ${data.progress}%`);
+        }
+      }
+    } catch (error) {
+      console.error("Progress recovery failed:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (currentSessionId && isUploading) {
+      recoverProgress(currentSessionId);
+    }
+  }, [currentSessionId, isUploading]);
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) {
-      resetInputOnly();
+      resetAllState();
       return;
     }
 
@@ -93,7 +166,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       const msg = err ?? "Invalid file.";
       setError(msg);
       toast.error(msg);
-      resetInputOnly();
+      resetAllState();
       return;
     }
 
@@ -101,32 +174,26 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setTitleText(f.name);
     setFileInfo(formatBytes(f.size));
     setUploadStatus("Starting upload...");
+    setFinalUrl(null);
 
     onFilesSelected?.(files);
     void uploadFile(f);
-    if (inputRef.current) inputRef.current.value = "";
   };
 
   const uploadFile = async (file: File) => {
-    let uploadId = "";
-    
     try {
       setIsUploading(true);
       setProgress(0);
       setUploadStatus("Starting upload...");
 
-      const form = new FormData();
-      form.append("file", file);
-      form.append("expires", expiresOption);
-      form.append("domain", selectedDomain);
-
-      const tempUploadId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      setCurrentUploadId(tempUploadId);
-      uploadId = tempUploadId;
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("expires", expiresOption);
+      formData.append("domain", selectedDomain);
 
       const response = await fetch("/api/upload", {
         method: "POST",
-        body: form,
+        body: formData,
       });
 
       if (!response.ok) {
@@ -135,43 +202,18 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       }
 
       const data = await response.json();
-      const slug = data?.slug;
-      const serverUploadId = data?.uploadId;
-      
-      if (!slug) throw new Error("Invalid server response");
 
-      if (serverUploadId && serverUploadId !== uploadId) {
-        setCurrentUploadId(serverUploadId);
-        uploadId = serverUploadId;
+      if (data.sessionId) {
+        setCurrentSessionId(data.sessionId);
+        setUploadStatus("Upload started...");
+      } else {
+        throw new Error("No session ID received");
       }
-
-      const link = buildPublicUrl(slug, selectedDomain);
-      setFinalUrl(link);
-      setProgress(100);
-      setUploadStatus("Upload completed!");
-      toast.success("Upload completed successfully.");
-
-      setTimeout(() => resetInputOnly());
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
       setUploadStatus("Upload failed");
       toast.error(msg);
-      
-      if (uploadId) {
-        try {
-          await fetch("/api/upload/progress", {
-            method: "DELETE",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ uploadId }),
-          });
-        } catch (error) {
-          console.error("Failed to cleanup progress:", error);
-        }
-      }
-    } finally {
       setIsUploading(false);
     }
   };
@@ -206,18 +248,27 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           </Tabs>
         </div>
 
-        <Select value={selectedDomain} onValueChange={(v) => setSelectedDomain(v as AllowedDomain)}>
-          <SelectTrigger className="w-64">
-            <SelectValue placeholder="Select domain" />
-          </SelectTrigger>
-          <SelectContent>
-            {allowedDomains.map((domain) => (
-              <SelectItem key={domain} value={domain}>
-                {domain}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-xs md:text-sm text-neutral-200/60 mb-2">
+            <Globe className="h-4 w-4" />
+            <span>Domain</span>
+          </div>
+          <Select
+            value={selectedDomain}
+            onValueChange={(v) => setSelectedDomain(v as AllowedDomain)}
+          >
+            <SelectTrigger className="w-64">
+              <SelectValue placeholder="Select domain" />
+            </SelectTrigger>
+            <SelectContent>
+              {allowedDomains.map((domain) => (
+                <SelectItem key={domain} value={domain}>
+                  {domain}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Button
@@ -239,55 +290,58 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       </Button>
 
       <div className="mt-6">
-        {isUploading ? (
+        {(isUploading || finalUrl) && (
           <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between text-sm text-neutral-200/60">
-              <span>{uploadStatus}</span>
-              <span>{progress}%</span>
-            </div>
-            <Progress 
-              value={progress} 
-              className="h-2 bg-neutral-800"
-            />
+            {isUploading && (
+              <>
+                <div className="flex items-center justify-between text-sm text-neutral-200/60">
+                  <span>{uploadStatus}</span>
+                  <span>{progress}%</span>
+                </div>
+                <Progress value={progress} className="h-2 bg-neutral-800" />
+              </>
+            )}
+
+            {finalUrl && (
+              <FadeInUp>
+                <div className="flex items-center gap-2 select-none mt-4">
+                  <Input
+                    className="flex-1 h-10 rounded-lg border border-neutral-600 text-neutral-200/80 bg-transparent px-3 text-sm"
+                    title={finalUrl}
+                    aria-label="File URL"
+                    disabled
+                    value={finalUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <div className="relative">
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(finalUrl);
+                          setCopied(true);
+                          toast.success("Link copied.");
+                          setTimeout(() => setCopied(false), 1500);
+                        } catch {
+                          window.prompt("Copy the link:", finalUrl);
+                          setCopied(true);
+                          toast.success("Link copied.");
+                          setTimeout(() => setCopied(false), 1500);
+                        }
+                      }}
+                      className="h-10 w-10 inline-flex items-center justify-center rounded-lg border"
+                      aria-label={copied ? "Copied" : "Copy URL"}
+                      title={copied ? "Copied" : "Copy URL"}
+                      size="icon"
+                    >
+                      {copied ? <Check size={16} /> : <Copy size={16} />}
+                    </Button>
+                  </div>
+                </div>
+              </FadeInUp>
+            )}
           </div>
-        ) : finalUrl ? (
-          <FadeInUp>
-            <div className="flex items-center gap-2 select-none">
-              <Input
-                className="flex-1 h-10 rounded-lg border border-neutral-600 text-neutral-200/80 bg-transparent px-3 text-sm"
-                title={finalUrl ?? ""}
-                aria-label="File URL"
-                disabled
-                value={finalUrl ?? ""}
-                onFocus={(e) => e.currentTarget.select()}
-              />
-              <div className="relative">
-                <Button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(finalUrl ?? "");
-                      setCopied(true);
-                      toast.success("Link copied.");
-                      setTimeout(() => setCopied(false), 1500);
-                    } catch {
-                      window.prompt("Copy the link:", finalUrl ?? "");
-                      setCopied(true);
-                      toast.success("Link copied.");
-                      setTimeout(() => setCopied(false), 1500);
-                    }
-                  }}
-                  className="h-10 w-10 inline-flex items-center justify-center rounded-lg border"
-                  aria-label={copied ? "Copied" : "Copy URL"}
-                  title={copied ? "Copied" : "Copy URL"}
-                  size="icon"
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                </Button>
-              </div>
-            </div>
-          </FadeInUp>
-        ) : null}
+        )}
       </div>
     </div>
   );
