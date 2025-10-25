@@ -16,6 +16,7 @@ export async function processUploadJob(jobData: any) {
   const { sessionId, file, expiresField, submittedDomain } = jobData;
 
   try {
+    console.log("ProcessUploadJob started for session:", sessionId);
     await reportProgress(sessionId, 5);
 
     const r2 = getR2Client();
@@ -70,6 +71,7 @@ export async function processUploadJob(jobData: any) {
 
     if (!id) throw new Error("Failed to create upload record");
 
+    console.log("Database record created, ID:", id);
     await reportProgress(sessionId, 10);
 
     const fileBuffer = Buffer.from(file.buffer, "base64");
@@ -77,7 +79,15 @@ export async function processUploadJob(jobData: any) {
     const sse =
       process.env.R2_FORCE_SSE === "true" ? ("AES256" as const) : undefined;
 
+    console.log(
+      "File size:",
+      file.size,
+      "Using multipart:",
+      file.size > 5 * 1024 * 1024,
+    );
+
     if (file.size <= 5 * 1024 * 1024) {
+      console.log("Using single part upload");
       await r2.send(
         new PutObjectCommand({
           Bucket: bucket,
@@ -103,9 +113,11 @@ export async function processUploadJob(jobData: any) {
         completed: true,
       };
 
+      console.log("Single part upload completed");
       await reportProgress(sessionId, 100);
       await sendResult(sessionId, finalResult);
     } else {
+      console.log("Using multipart upload");
       await processMultipartUpload(
         sessionId,
         id,
@@ -147,6 +159,8 @@ async function processMultipartUpload(
   const CHUNK_SIZE = 5 * 1024 * 1024;
   const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
 
+  console.log("Starting multipart upload, chunks:", totalChunks);
+
   const createRes = await r2.send(
     new CreateMultipartUploadCommand({
       Bucket: bucket,
@@ -167,6 +181,7 @@ async function processMultipartUpload(
       const end = Math.min(start + CHUNK_SIZE, fileBuffer.length);
       const chunk = fileBuffer.subarray(start, end);
 
+      console.log(`Uploading part ${partNumber}/${totalChunks}`);
       const { ETag } = await r2.send(
         new UploadPartCommand({
           Bucket: bucket,
@@ -210,9 +225,11 @@ async function processMultipartUpload(
       completed: true,
     };
 
+    console.log("Multipart upload completed");
     await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
   } catch (e) {
+    console.error("Multipart upload failed:", e);
     await reportProgress(sessionId, -1);
     try {
       await r2.send(

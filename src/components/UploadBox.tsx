@@ -70,7 +70,10 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   useEffect(() => {
     if (!channel) return;
 
+    console.log("Pusher channel available, setting up listeners");
+
     const handleProgress = (data: any) => {
+      console.log("Progress event received:", data);
       const newProgress = data.progress || 0;
       setProgress(newProgress);
 
@@ -88,6 +91,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     };
 
     const handleResult = (data: any) => {
+      console.log("Result event received:", data);
       setFinalUrl(data.publicUrl);
       setProgress(100);
       setUploadStatus("Upload completed!");
@@ -100,6 +104,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     };
 
     const handleError = (data: any) => {
+      console.log("Error event received:", data);
       setUploadStatus("Upload failed");
       setIsUploading(false);
       toast.error(data.error);
@@ -154,10 +159,13 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       formData.append("expires", expiresOption);
       formData.append("domain", selectedDomain);
 
+      console.log("Sending upload request to API...");
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
+
+      console.log("API response status:", response.status);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -165,6 +173,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       }
 
       const data = await response.json();
+      console.log("API response data:", data);
 
       if (data.sessionId) {
         setCurrentSessionId(data.sessionId);

@@ -22,10 +22,14 @@ export async function POST(req: NextRequest) {
     const { valid, error } = validateFile(file);
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
-    await reportProgress(sessionId, 1);
+    console.log("Testing Pusher connection for session:", sessionId);
+    await reportProgress(sessionId, 10);
+    console.log("Pusher test completed");
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+
+    console.log("Starting upload job for file:", file.name);
 
     await processUploadJob({
       sessionId,
@@ -38,6 +42,8 @@ export async function POST(req: NextRequest) {
       expiresField,
       submittedDomain,
     });
+
+    console.log("Upload job completed for session:", sessionId);
 
     return NextResponse.json(
       {
