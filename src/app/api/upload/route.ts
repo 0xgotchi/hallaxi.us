@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    processUploadJob({
+    await processUploadJob({
       sessionId,
       file: {
         name: file.name,
@@ -37,18 +37,19 @@ export async function POST(req: NextRequest) {
       },
       expiresField,
       submittedDomain,
-    }).catch(console.error);
+    });
 
     return NextResponse.json(
       {
-        status: "started",
+        status: "completed",
         sessionId,
-        message: "Upload started",
+        message: "Upload completed successfully",
       },
-      { status: 202 },
+      { status: 200 },
     );
   } catch (err: any) {
     console.error("Upload error:", err);
+    await reportProgress(sessionId, -1);
     return NextResponse.json(
       {
         error: err.message || "Upload failed",
