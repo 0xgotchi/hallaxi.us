@@ -12,8 +12,6 @@ import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
 import { generateSlug, generateSnowflakeIdFor } from "@/lib/utils";
 
-export const runtime = "nodejs";
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();

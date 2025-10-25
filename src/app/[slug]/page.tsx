@@ -14,7 +14,7 @@ export default async function SlugPage({ params }: SlugPageProps) {
     return (
       <ErrorPage
         title="Not found"
-        description="The file does not exist or has expired."
+        description="This file does not exist or has expired."
       />
     );
   }
@@ -25,7 +25,7 @@ export default async function SlugPage({ params }: SlugPageProps) {
     return (
       <ErrorPage
         title="Not found"
-        description="The file does not exist or has expired."
+        description="This file does not exist or has expired."
       />
     );
   }
@@ -36,7 +36,7 @@ export default async function SlugPage({ params }: SlugPageProps) {
     return (
       <ErrorPage
         title="Not found"
-        description="The file does not exist or has expired."
+        description="This file does not exist or has expired."
       />
     );
   }
@@ -51,7 +51,7 @@ export default async function SlugPage({ params }: SlugPageProps) {
     return (
       <ErrorPage
         title="Not found"
-        description="O domínio da página não corresponde ao domínio do arquivo."
+        description="This file does not exist or has expired."
       />
     );
   }
