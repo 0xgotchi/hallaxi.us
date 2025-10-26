@@ -10,7 +10,7 @@ import {
 } from "@/lib/worker/processor";
 
 const uploadStatus = new Map();
-const CHUNK_SIZE = 1 * 1024 * 1024;
+const CHUNK_SIZE = 4 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

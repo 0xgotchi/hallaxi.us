@@ -185,15 +185,13 @@ export async function finalizeChunkedUpload(jobData: any) {
       throw new Error("File chunks not found");
     }
 
-    // Aqui, adicionamos a tipagem explícita para 'chunks.entries()'
     const chunksArray = Array.from(fileData.chunks.entries()) as [
       number,
       Buffer,
     ][];
 
-    // Ordenar e mapear explicitamente
-    chunksArray.sort((a, b) => a[0] - b[0]); // Ordena pela chave (índice do chunk)
-    const chunks: Buffer[] = chunksArray.map((entry) => entry[1]); // Extrai os buffers
+    chunksArray.sort((a, b) => a[0] - b[0]);
+    const chunks: Buffer[] = chunksArray.map((entry) => entry[1]);
 
     const fileBuffer = Buffer.concat(chunks);
     const key = `${id}/${fileName}`;
@@ -250,7 +248,7 @@ async function processMultipartUploadFinal(
   fileType: string,
   fileBuffer: Buffer,
 ) {
-  const CHUNK_SIZE = 5 * 1024 * 1024;
+  const CHUNK_SIZE = 4 * 1024 * 1024;
   const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
 
   const createRes = await r2.send(
@@ -284,7 +282,6 @@ async function processMultipartUploadFinal(
             }),
           )
           .then((res: { ETag?: string }) => {
-            // Adicionando tipo para 'res'
             const ETag = res.ETag;
             parts.push({ ETag, PartNumber: partNumber });
           }),

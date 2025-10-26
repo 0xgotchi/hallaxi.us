@@ -29,7 +29,7 @@ export type UploadBoxProps = {
   onFilesSelected?: (files: FileList) => void;
 };
 
-const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB chunks
+const CHUNK_SIZE = 4 * 1024 * 1024;
 
 export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -105,7 +105,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
           setTimeout(() => {
             resetUploadState();
-          }, 3000);
+          });
         } else if (data.status === "failed") {
           setUploadStatus("Upload failed");
           setIsUploading(false);
@@ -146,7 +146,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       } else if (newProgress < 10) {
         setUploadStatus("Preparing upload...");
       } else if (newProgress < 100) {
-        setUploadStatus(`Uploading... ${newProgress}%`);
+        setUploadStatus(`Uploading...`);
       } else if (newProgress === 100) {
         setUploadStatus("Finalizing...");
       }
@@ -161,7 +161,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
       setTimeout(() => {
         resetUploadState();
-      }, 3000);
+      });
     };
 
     const handleError = (data: any) => {
@@ -242,14 +242,12 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         const data = await response.json();
         const chunkProgress = Math.round(((chunkIndex + 1) / totalChunks) * 90);
         setProgress(chunkProgress);
-        setUploadStatus(`Uploading chunks... ${chunkProgress}%`);
       } catch (error) {
         console.error(`Chunk ${chunkIndex} upload failed:`, error);
         throw error;
       }
     }
 
-    // Finalizar upload
     const finalizeFormData = new FormData();
     finalizeFormData.append("finalize", "true");
     finalizeFormData.append("fileId", fileId);
@@ -296,7 +294,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       let result;
 
       if (file.size > 4 * 1024 * 1024) {
-        // Upload em chunks para arquivos grandes
         setUploadStatus("Starting chunked upload...");
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileId =
@@ -304,7 +301,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
         result = await uploadFileInChunks(file, fileId, totalChunks);
       } else {
-        // Upload tradicional para arquivos pequenos
         setUploadStatus("Uploading...");
         const formData = new FormData();
         formData.append("file", file);
@@ -348,7 +344,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
       setTimeout(() => {
         resetUploadState();
-      }, 3000);
+      });
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);

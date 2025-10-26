@@ -1,15 +1,8 @@
 import path from "path";
+import type { NextConfig } from "next";
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ["@aws-sdk/client-s3"],
-  },
-  api: {
-    bodyParser: {
-      sizeLimit: "50mb",
-    },
-  },
+const nextConfig: NextConfig = {
+  serverExternalPackages: ["@aws-sdk/client-s3"],
   turbopack: {
     root: path.resolve(__dirname),
   },
