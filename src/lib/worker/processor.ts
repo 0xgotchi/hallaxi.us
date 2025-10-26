@@ -12,12 +12,30 @@ import { getR2Client } from "@/lib/r2";
 import { generateSlug, generateSnowflakeId } from "@/lib/utils";
 import { reportProgress, sendResult, sendError } from "@/lib/realtime";
 
-const chunkStorage = new Map();
+interface ChunkData {
+  chunks: Map<number, Buffer>;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  expiresField: string;
+  submittedDomain: string;
+  createdAt: number;
+  totalChunks: number;
+  receivedChunks: Set<number>;
+}
+
+const chunkStorage = new Map<string, ChunkData>();
+
+const sanitizeFileName = (fileName: string): string => {
+  return fileName.replace(/\s+/g, "_");
+};
 
 export async function processUploadJob(jobData: any) {
   const { sessionId, file, expiresField, submittedDomain } = jobData;
 
   try {
+    const sanitizedFileName = sanitizeFileName(file.name);
+
     const r2 = getR2Client();
     if (!r2) throw new Error("R2 client not initialized");
 
@@ -37,7 +55,7 @@ export async function processUploadJob(jobData: any) {
     await prisma.upload.create({
       data: {
         id,
-        filename: file.name,
+        filename: sanitizedFileName,
         type: file.type,
         url: slug,
         uploadAt: now,
@@ -48,7 +66,7 @@ export async function processUploadJob(jobData: any) {
     });
 
     const fileBuffer = Buffer.from(file.buffer, "base64");
-    const key = `${id}/${file.name}`;
+    const key = `${id}/${sanitizedFileName}`;
 
     if (file.size > 1024 * 1024) {
       await reportProgress(sessionId, 10);
@@ -70,7 +88,7 @@ export async function processUploadJob(jobData: any) {
 
     const finalResult = {
       slug,
-      filename: file.name,
+      filename: sanitizedFileName,
       size: file.size,
       type: file.type,
       url: `/${slug}`,
@@ -106,28 +124,49 @@ export async function processChunkedUpload(jobData: any) {
     fileSize,
     expiresField,
     submittedDomain,
+    totalChunks,
   } = jobData;
 
   try {
+    const sanitizedFileName = sanitizeFileName(fileName);
+
     if (!chunkStorage.has(fileId)) {
       chunkStorage.set(fileId, {
         chunks: new Map(),
-        fileName,
+        fileName: sanitizedFileName,
         fileType,
         fileSize,
         expiresField,
         submittedDomain,
         createdAt: Date.now(),
+        totalChunks: chunk.total,
+        receivedChunks: new Set(),
       });
     }
 
     const fileData = chunkStorage.get(fileId);
-    fileData.chunks.set(chunk.index, Buffer.from(chunk.data, "base64"));
+    if (!fileData) {
+      throw new Error("File data not found");
+    }
 
-    const progress = Math.round(((chunk.index + 1) / chunk.total) * 80) + 10;
+    if (fileData.receivedChunks.has(chunk.index)) {
+      return { success: true, chunkIndex: chunk.index, duplicated: true };
+    }
+
+    fileData.chunks.set(chunk.index, Buffer.from(chunk.data, "base64"));
+    fileData.receivedChunks.add(chunk.index);
+
+    const progress =
+      Math.round((fileData.receivedChunks.size / fileData.totalChunks) * 80) +
+      10;
     await reportProgress(sessionId, progress);
 
-    return { success: true, chunkIndex: chunk.index };
+    return {
+      success: true,
+      chunkIndex: chunk.index,
+      receivedChunks: fileData.receivedChunks.size,
+      totalChunks: fileData.totalChunks,
+    };
   } catch (error) {
     console.error(`Chunk upload failed for ${sessionId}:`, error);
     await sendError(
@@ -137,6 +176,7 @@ export async function processChunkedUpload(jobData: any) {
     throw error;
   }
 }
+
 export async function finalizeChunkedUpload(jobData: any) {
   const {
     sessionId,
@@ -149,11 +189,43 @@ export async function finalizeChunkedUpload(jobData: any) {
   } = jobData;
 
   try {
+    const sanitizedFileName = sanitizeFileName(fileName);
+
     const r2 = getR2Client();
     if (!r2) throw new Error("R2 client not initialized");
 
     const bucket = process.env.R2_BUCKET;
     if (!bucket) throw new Error("R2_BUCKET not configured");
+
+    const fileData = chunkStorage.get(fileId);
+    if (!fileData) {
+      throw new Error("File chunks not found");
+    }
+
+    if (fileData.receivedChunks.size !== fileData.totalChunks) {
+      throw new Error(
+        `Missing chunks. Received ${fileData.receivedChunks.size} of ${fileData.totalChunks}`,
+      );
+    }
+
+    await reportProgress(sessionId, 92);
+
+    const chunks: Buffer[] = [];
+    for (let i = 0; i < fileData.totalChunks; i++) {
+      const chunk = fileData.chunks.get(i);
+      if (!chunk) {
+        throw new Error(`Chunk ${i} not found`);
+      }
+      chunks.push(chunk);
+    }
+
+    const fileBuffer = Buffer.concat(chunks);
+
+    if (fileBuffer.length !== fileSize) {
+      throw new Error(
+        `File size mismatch. Expected ${fileSize}, got ${fileBuffer.length}`,
+      );
+    }
 
     const domain = allowedDomains.includes(submittedDomain as any)
       ? submittedDomain
@@ -168,7 +240,7 @@ export async function finalizeChunkedUpload(jobData: any) {
     await prisma.upload.create({
       data: {
         id,
-        filename: fileName,
+        filename: sanitizedFileName,
         type: fileType,
         url: slug,
         uploadAt: now,
@@ -180,21 +252,7 @@ export async function finalizeChunkedUpload(jobData: any) {
 
     await reportProgress(sessionId, 95);
 
-    const fileData = chunkStorage.get(fileId);
-    if (!fileData) {
-      throw new Error("File chunks not found");
-    }
-
-    const chunksArray = Array.from(fileData.chunks.entries()) as [
-      number,
-      Buffer,
-    ][];
-
-    chunksArray.sort((a, b) => a[0] - b[0]);
-    const chunks: Buffer[] = chunksArray.map((entry) => entry[1]);
-
-    const fileBuffer = Buffer.concat(chunks);
-    const key = `${id}/${fileName}`;
+    const key = `${id}/${sanitizedFileName}`;
 
     if (fileSize <= 5 * 1024 * 1024) {
       await r2.send(
@@ -209,6 +267,8 @@ export async function finalizeChunkedUpload(jobData: any) {
       await processMultipartUploadFinal(r2, bucket, key, fileType, fileBuffer);
     }
 
+    await reportProgress(sessionId, 98);
+
     await prisma.upload.update({
       where: { id },
       data: { r2Key: key, domain },
@@ -218,7 +278,7 @@ export async function finalizeChunkedUpload(jobData: any) {
 
     const finalResult = {
       slug,
-      filename: fileName,
+      filename: sanitizedFileName,
       size: fileSize,
       type: fileType,
       url: `/${slug}`,

@@ -12,6 +12,10 @@ import {
 const uploadStatus = new Map();
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
+const sanitizeFileName = (fileName: string): string => {
+  return fileName.replace(/\s+/g, "_");
+};
+
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -23,9 +27,15 @@ export async function POST(req: NextRequest) {
     const fileId = formData.get("fileId");
     const expiresField = String(formData.get("expires") ?? "7d");
     const submittedDomain = String(formData.get("domain") ?? "");
-    const fileName = String(formData.get("fileName") ?? "");
+    let fileName = String(formData.get("fileName") ?? "");
     const fileType = String(formData.get("fileType") ?? "");
     const fileSize = String(formData.get("fileSize") ?? "");
+
+    if (!fileName && file instanceof File) {
+      fileName = file.name;
+    }
+
+    const sanitizedFileName = sanitizeFileName(fileName);
 
     if (chunkIndex !== null && totalChunks !== null && fileId !== null) {
       return await processChunkUpload(
@@ -34,7 +44,7 @@ export async function POST(req: NextRequest) {
         parseInt(chunkIndex as string),
         parseInt(totalChunks as string),
         fileId as string,
-        fileName,
+        sanitizedFileName,
         fileType,
         parseInt(fileSize),
         expiresField,
@@ -47,7 +57,7 @@ export async function POST(req: NextRequest) {
       return await finalizeChunkedUploadHandler(
         sessionId,
         fileId as string,
-        fileName,
+        sanitizedFileName,
         fileType,
         parseInt(fileSize),
         expiresField,
@@ -59,19 +69,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File not provided" }, { status: 400 });
     }
 
-    const { valid, error } = validateFile(file);
+    let fileToProcess = file;
+    if (sanitizedFileName !== file.name) {
+      fileToProcess = new File([file], sanitizedFileName, {
+        type: file.type,
+        lastModified: file.lastModified,
+      });
+    }
+
+    const { valid, error } = validateFile(fileToProcess);
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
-    if (file.size <= 4 * 1024 * 1024) {
-      const arrayBuffer = await file.arrayBuffer();
+    if (fileToProcess.size <= 4 * 1024 * 1024) {
+      const arrayBuffer = await fileToProcess.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
       const result = await processUploadJob({
         sessionId,
         file: {
-          name: file.name,
-          type: file.type,
-          size: file.size,
+          name: sanitizedFileName,
+          type: fileToProcess.type,
+          size: fileToProcess.size,
           buffer: buffer.toString("base64"),
         },
         expiresField,
@@ -85,7 +103,7 @@ export async function POST(req: NextRequest) {
       });
     } else {
       const fileId = generateSnowflakeId();
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      const totalChunks = Math.ceil(fileToProcess.size / CHUNK_SIZE);
 
       uploadStatus.set(sessionId, {
         status: "chunked_started",
@@ -94,9 +112,9 @@ export async function POST(req: NextRequest) {
         uploadedChunks: 0,
         expiresField,
         submittedDomain,
-        filename: file.name,
-        filetype: file.type,
-        filesize: file.size,
+        filename: sanitizedFileName,
+        filetype: fileToProcess.type,
+        filesize: fileToProcess.size,
       });
 
       return NextResponse.json({
@@ -147,6 +165,7 @@ async function processChunkUpload(
       fileSize,
       expiresField,
       submittedDomain,
+      totalChunks,
     });
 
     const status = uploadStatus.get(sessionId);
@@ -155,13 +174,15 @@ async function processChunkUpload(
       const progress = Math.round((status.uploadedChunks / totalChunks) * 100);
 
       if (status.uploadedChunks === totalChunks) {
-        status.status = "completed";
+        status.status = "ready_for_finalize";
       }
     }
 
     return NextResponse.json({
       success: true,
       chunkIndex,
+      receivedChunks: result.receivedChunks,
+      totalChunks: result.totalChunks,
       progress: Math.round(((chunkIndex + 1) / totalChunks) * 100),
     });
   } catch (err: any) {

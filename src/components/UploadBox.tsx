@@ -31,6 +31,10 @@ export type UploadBoxProps = {
 
 const CHUNK_SIZE = 4 * 1024 * 1024;
 
+const sanitizeFileName = (fileName: string): string => {
+  return fileName.replace(/\s+/g, "_");
+};
+
 export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [titleText, setTitleText] = useState("Click here to select a file");
@@ -74,7 +78,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     if (!currentSessionId || !isUploading) return;
 
     let pollCount = 0;
-    const maxPolls = 120;
+    const maxPolls = 180;
 
     const pollInterval = setInterval(async () => {
       pollCount++;
@@ -98,6 +102,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         if (data.status === "completed" && data.result) {
           setFinalUrl(data.result.publicUrl);
           setProgress(100);
+          setUploadStatus("Completed");
           setIsUploading(false);
           toast.success("Upload completed successfully.");
           clearInterval(pollInterval);
@@ -114,15 +119,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           if (data.progress > progress) {
             setProgress(data.progress);
           }
-
-          if (data.progress > 0 && data.progress < 100) {
-            setUploadStatus("Uploading...");
-          }
         }
       } catch (error) {
         console.error("Polling error:", error);
       }
-    }, 500);
+    }, 1000);
 
     return () => clearInterval(pollInterval);
   }, [currentSessionId, isUploading, progress]);
@@ -138,14 +139,13 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         setUploadStatus("Upload failed");
         setIsUploading(false);
         toast.error("Upload failed");
-      } else if (newProgress > 0 && newProgress < 100) {
-        setUploadStatus("Uploading...");
       }
     };
 
     const handleResult = (data: any) => {
       setFinalUrl(data.publicUrl);
       setProgress(100);
+      setUploadStatus("Completed");
       setIsUploading(false);
       toast.success("Upload completed successfully.");
 
@@ -178,8 +178,19 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       return;
     }
 
-    const f = files[0];
-    const { valid, error: err } = validateFile(f);
+    const originalFile = files[0];
+
+    const sanitizedFileName = sanitizeFileName(originalFile.name);
+    let fileToUpload = originalFile;
+
+    if (sanitizedFileName !== originalFile.name) {
+      fileToUpload = new File([originalFile], sanitizedFileName, {
+        type: originalFile.type,
+        lastModified: originalFile.lastModified,
+      });
+    }
+
+    const { valid, error: err } = validateFile(fileToUpload);
     if (!valid) {
       const msg = err ?? "Invalid file.";
       setError(msg);
@@ -189,13 +200,13 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     }
 
     setError(null);
-    setTitleText(f.name);
-    setFileInfo(formatBytes(f.size));
-    setUploadStatus("Starting upload...");
+    setTitleText(sanitizedFileName);
+    setFileInfo(formatBytes(fileToUpload.size));
+    setUploadStatus("");
     setFinalUrl(null);
 
     onFilesSelected?.(files);
-    void uploadFile(f);
+    void uploadFile(fileToUpload);
   };
 
   const uploadFileInChunks = async (
@@ -203,6 +214,8 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     fileId: string,
     totalChunks: number,
   ) => {
+    const failedChunks: number[] = [];
+
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
       const start = chunkIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -232,15 +245,32 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         const data = await response.json();
         const chunkProgress = Math.round(((chunkIndex + 1) / totalChunks) * 90);
         setProgress(chunkProgress);
-
-        if (chunkProgress > 0 && chunkProgress < 100) {
-          setUploadStatus("Uploading...");
-        }
       } catch (error) {
         console.error(`Chunk ${chunkIndex} upload failed:`, error);
-        throw error;
+        failedChunks.push(chunkIndex);
+
+        try {
+          const retryResponse = await fetch("/api/upload", {
+            method: "POST",
+            body: chunkFormData,
+          });
+
+          if (!retryResponse.ok) {
+            throw new Error(`Retry failed for chunk ${chunkIndex}`);
+          }
+
+          failedChunks.splice(failedChunks.indexOf(chunkIndex), 1);
+        } catch (retryError) {
+          throw new Error(`Failed to upload chunk ${chunkIndex} after retry`);
+        }
       }
     }
+
+    if (failedChunks.length > 0) {
+      throw new Error(`Failed to upload chunks: ${failedChunks.join(", ")}`);
+    }
+
+    setProgress(95);
 
     const finalizeFormData = new FormData();
     finalizeFormData.append("finalize", "true");
@@ -257,7 +287,8 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     });
 
     if (!response.ok) {
-      throw new Error(`Finalize error ${response.status}`);
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Finalize error ${response.status}`);
     }
 
     const data = await response.json();
@@ -268,7 +299,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     try {
       setIsUploading(true);
       setProgress(0);
-      setUploadStatus("Starting upload...");
+      setUploadStatus("");
 
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setCurrentSessionId(sessionId);
@@ -289,14 +320,12 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       let result;
 
       if (file.size > 4 * 1024 * 1024) {
-        setUploadStatus("Uploading...");
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileId =
           Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 
         result = await uploadFileInChunks(file, fileId, totalChunks);
       } else {
-        setUploadStatus("Uploading...");
         const formData = new FormData();
         formData.append("file", file);
         formData.append("expires", expiresOption);
@@ -344,7 +373,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
-      setUploadStatus("Upload failed");
+      setUploadStatus("");
       toast.error(msg);
       setIsUploading(false);
     }
@@ -425,20 +454,18 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         {(isUploading || finalUrl) && (
           <div className="flex flex-col gap-3">
             {isUploading && (
-              <>
-                <div className="flex items-center justify-between text-sm text-neutral-200/60">
-                  <span>{uploadStatus}</span>
-                  <span>{progress}%</span>
-                </div>
+              <div className="relative pt-5">
                 <Progress value={progress} className="h-2 bg-neutral-800" />
-              </>
+                <span className="absolute top-0 right-0 text-sm text-neutral-200/60">
+                  {progress}%
+                </span>
+              </div>
             )}
 
             {finalUrl && (
               <FadeInUp>
                 <div className="flex items-center gap-2 select-none mt-4">
                   <Input
-                    className="flex-1 h-10 rounded-lg border border-neutral-600 text-neutral-200/80 bg-transparent px-3 text-sm"
                     title={finalUrl}
                     aria-label="File URL"
                     disabled
