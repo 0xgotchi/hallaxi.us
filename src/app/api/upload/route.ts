@@ -7,6 +7,8 @@ import { processUploadJob } from "@/lib/worker/processor";
 
 const uploadStatus = new Map();
 
+const MULTIPART_THRESHOLD = 4 * 1024 * 1024;
+
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -33,7 +35,7 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    if (file.size <= 1024 * 1024) {
+    if (file.size <= MULTIPART_THRESHOLD) {
       const result = await processUploadJob({
         sessionId,
         file: {
@@ -95,7 +97,7 @@ export async function POST(req: NextRequest) {
         {
           status: "started",
           sessionId,
-          message: "Upload started successfully",
+          message: "Large file upload started (multipart)",
           initialProgress: 10,
         },
         { status: 202 },
