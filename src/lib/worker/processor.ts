@@ -248,7 +248,7 @@ async function processMultipartUploadFinal(
   fileType: string,
   fileBuffer: Buffer,
 ) {
-  const CHUNK_SIZE = 10 * 1024 * 1024;
+  const CHUNK_SIZE = 40 * 1024 * 1024;
   const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
 
   const createRes = await r2.send(
