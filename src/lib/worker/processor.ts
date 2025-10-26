@@ -22,13 +22,28 @@ interface ChunkData {
   createdAt: number;
   totalChunks: number;
   receivedChunks: Set<number>;
+  lastActivity: number;
 }
 
 const chunkStorage = new Map<string, ChunkData>();
+const CHUNK_EXPIRY_TIME = 5 * 60 * 1000;
 
 const sanitizeFileName = (fileName: string): string => {
   return fileName.replace(/\s+/g, "_");
 };
+
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [fileId, chunkData] of chunkStorage.entries()) {
+      if (now - chunkData.lastActivity > CHUNK_EXPIRY_TIME) {
+        console.log(`Cleaning up expired chunks for file: ${fileId}`);
+        chunkStorage.delete(fileId);
+      }
+    }
+  },
+  5 * 60 * 1000,
+);
 
 export async function processUploadJob(jobData: any) {
   const { sessionId, file, expiresField, submittedDomain } = jobData;
@@ -141,6 +156,7 @@ export async function processChunkedUpload(jobData: any) {
         createdAt: Date.now(),
         totalChunks: chunk.total,
         receivedChunks: new Set(),
+        lastActivity: Date.now(),
       });
     }
 
@@ -149,16 +165,30 @@ export async function processChunkedUpload(jobData: any) {
       throw new Error("File data not found");
     }
 
+    fileData.lastActivity = Date.now();
+
     if (fileData.receivedChunks.has(chunk.index)) {
-      return { success: true, chunkIndex: chunk.index, duplicated: true };
+      console.log(`Chunk ${chunk.index} already received for file ${fileId}`);
+      return {
+        success: true,
+        chunkIndex: chunk.index,
+        duplicated: true,
+        receivedChunks: fileData.receivedChunks.size,
+        totalChunks: fileData.totalChunks,
+      };
     }
 
     fileData.chunks.set(chunk.index, Buffer.from(chunk.data, "base64"));
     fileData.receivedChunks.add(chunk.index);
 
+    console.log(
+      `Received chunk ${chunk.index + 1}/${fileData.totalChunks} for file ${fileId}`,
+    );
+
     const progress =
       Math.round((fileData.receivedChunks.size / fileData.totalChunks) * 80) +
       10;
+
     await reportProgress(sessionId, progress);
 
     return {
@@ -199,12 +229,21 @@ export async function finalizeChunkedUpload(jobData: any) {
 
     const fileData = chunkStorage.get(fileId);
     if (!fileData) {
-      throw new Error("File chunks not found");
+      throw new Error(
+        "File chunks not found - possible timeout or server restart",
+      );
     }
 
-    if (fileData.receivedChunks.size !== fileData.totalChunks) {
+    const missingChunks = [];
+    for (let i = 0; i < fileData.totalChunks; i++) {
+      if (!fileData.receivedChunks.has(i)) {
+        missingChunks.push(i);
+      }
+    }
+
+    if (missingChunks.length > 0) {
       throw new Error(
-        `Missing chunks. Received ${fileData.receivedChunks.size} of ${fileData.totalChunks}`,
+        `Missing ${missingChunks.length} chunks: ${missingChunks.join(", ")}. Received ${fileData.receivedChunks.size} of ${fileData.totalChunks}`,
       );
     }
 
@@ -214,7 +253,7 @@ export async function finalizeChunkedUpload(jobData: any) {
     for (let i = 0; i < fileData.totalChunks; i++) {
       const chunk = fileData.chunks.get(i);
       if (!chunk) {
-        throw new Error(`Chunk ${i} not found`);
+        throw new Error(`Chunk ${i} not found during finalization`);
       }
       chunks.push(chunk);
     }
@@ -289,10 +328,13 @@ export async function finalizeChunkedUpload(jobData: any) {
     await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
 
+    console.log(
+      `Successfully finalized upload for session ${sessionId}, file: ${sanitizedFileName}`,
+    );
+
     return finalResult;
   } catch (error) {
     console.error(`Finalize upload failed for ${sessionId}:`, error);
-    chunkStorage.delete(fileId);
     await sendError(
       sessionId,
       error instanceof Error ? error.message : "Finalize upload failed",

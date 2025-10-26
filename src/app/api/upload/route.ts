@@ -11,10 +11,24 @@ import {
 
 const uploadStatus = new Map();
 const CHUNK_SIZE = 4 * 1024 * 1024;
+const UPLOAD_TIMEOUT = 5 * 60 * 1000;
 
 const sanitizeFileName = (fileName: string): string => {
   return fileName.replace(/\s+/g, "_");
 };
+
+setInterval(
+  () => {
+    const now = Date.now();
+    for (const [sessionId, status] of uploadStatus.entries()) {
+      if (now - status.createdAt > UPLOAD_TIMEOUT) {
+        console.log(`Cleaning up expired upload session: ${sessionId}`);
+        uploadStatus.delete(sessionId);
+      }
+    }
+  },
+  5 * 60 * 1000,
+);
 
 export async function POST(req: NextRequest) {
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -115,6 +129,7 @@ export async function POST(req: NextRequest) {
         filename: sanitizedFileName,
         filetype: fileToProcess.type,
         filesize: fileToProcess.size,
+        createdAt: Date.now(),
       });
 
       return NextResponse.json({
@@ -171,6 +186,8 @@ async function processChunkUpload(
     const status = uploadStatus.get(sessionId);
     if (status) {
       status.uploadedChunks = (status.uploadedChunks || 0) + 1;
+      status.lastActivity = Date.now();
+
       const progress = Math.round((status.uploadedChunks / totalChunks) * 100);
 
       if (status.uploadedChunks === totalChunks) {
@@ -225,6 +242,13 @@ async function finalizeChunkedUploadHandler(
     });
   } catch (err: any) {
     console.error("Finalize upload error:", err);
+
+    const status = uploadStatus.get(sessionId);
+    if (status) {
+      status.status = "finalize_failed";
+      status.error = err.message;
+    }
+
     return NextResponse.json(
       {
         error: err.message || "Finalize upload failed",

@@ -30,10 +30,14 @@ export type UploadBoxProps = {
 };
 
 const CHUNK_SIZE = 4 * 1024 * 1024;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000;
 
 const sanitizeFileName = (fileName: string): string => {
   return fileName.replace(/\s+/g, "_");
 };
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -48,10 +52,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const [selectedDomain, setSelectedDomain] = useState<AllowedDomain>(
     allowedDomains[0],
   );
-  const [uploadStatus, setUploadStatus] = useState<string>("");
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [uploadedChunks, setUploadedChunks] = useState<number>(0);
+  const [totalChunks, setTotalChunks] = useState<number>(0);
 
-  const { saveSession, getSession } = useUploadSession();
+  const { saveSession } = useUploadSession();
   const effectiveAccept = accept ?? defaultAccept;
   const channelName = currentSessionId ? `upload-${currentSessionId}` : null;
   const { channel } = usePusherChannel(channelName);
@@ -63,9 +68,10 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setFileInfo("Maximum file size: 500MB");
     setError(null);
     setProgress(0);
-    setUploadStatus("");
     setCurrentSessionId("");
     setIsUploading(false);
+    setUploadedChunks(0);
+    setTotalChunks(0);
     if (inputRef.current) inputRef.current.value = "";
   };
 
@@ -75,60 +81,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   };
 
   useEffect(() => {
-    if (!currentSessionId || !isUploading) return;
-
-    let pollCount = 0;
-    const maxPolls = 180;
-
-    const pollInterval = setInterval(async () => {
-      pollCount++;
-
-      if (pollCount >= maxPolls) {
-        setUploadStatus("Upload timeout");
-        setIsUploading(false);
-        toast.error("Upload took too long, please try again");
-        clearInterval(pollInterval);
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `/api/upload?sessionId=${currentSessionId}`,
-        );
-        if (!response.ok) return;
-
-        const data = await response.json();
-
-        if (data.status === "completed" && data.result) {
-          setFinalUrl(data.result.publicUrl);
-          setProgress(100);
-          setUploadStatus("Completed");
-          setIsUploading(false);
-          toast.success("Upload completed successfully.");
-          clearInterval(pollInterval);
-
-          setTimeout(() => {
-            resetUploadState();
-          });
-        } else if (data.status === "failed") {
-          setUploadStatus("Upload failed");
-          setIsUploading(false);
-          toast.error(data.error || "Upload failed");
-          clearInterval(pollInterval);
-        } else if (data.progress !== undefined) {
-          if (data.progress > progress) {
-            setProgress(data.progress);
-          }
-        }
-      } catch (error) {
-        console.error("Polling error:", error);
-      }
-    }, 1000);
-
-    return () => clearInterval(pollInterval);
-  }, [currentSessionId, isUploading, progress]);
-
-  useEffect(() => {
     if (!channel) return;
 
     const handleProgress = (data: any) => {
@@ -136,7 +88,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       setProgress(newProgress);
 
       if (newProgress === -1) {
-        setUploadStatus("Upload failed");
         setIsUploading(false);
         toast.error("Upload failed");
       }
@@ -145,9 +96,23 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     const handleResult = (data: any) => {
       setFinalUrl(data.publicUrl);
       setProgress(100);
-      setUploadStatus("Completed");
       setIsUploading(false);
       toast.success("Upload completed successfully.");
+
+      saveSession({
+        id: currentSessionId,
+        status: "completed",
+        progress: 100,
+        filename: data.filename,
+        fileType: data.type,
+        fileSize: data.size,
+        expiresField: expiresOption,
+        domain: selectedDomain,
+        result: data,
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
 
       setTimeout(() => {
         resetUploadState();
@@ -155,21 +120,52 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     };
 
     const handleError = (data: any) => {
-      setUploadStatus("Upload failed");
       setIsUploading(false);
-      toast.error(data.error);
+      toast.error(data.error || "Upload failed");
+
+      saveSession({
+        id: currentSessionId,
+        status: "failed",
+        progress: progress,
+        filename:
+          titleText !== "Click here to select a file" ? titleText : "Unknown",
+        fileType: "unknown",
+        fileSize: 0,
+        expiresField: expiresOption,
+        domain: selectedDomain,
+        error: data.error,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    };
+
+    const handleChunkProgress = (data: any) => {
+      if (data.uploadedChunks !== undefined && data.totalChunks !== undefined) {
+        setUploadedChunks(data.uploadedChunks);
+        setTotalChunks(data.totalChunks);
+      }
     };
 
     channel.bind("progress", handleProgress);
     channel.bind("result", handleResult);
     channel.bind("error", handleError);
+    channel.bind("chunk-progress", handleChunkProgress);
 
     return () => {
       channel.unbind("progress", handleProgress);
       channel.unbind("result", handleResult);
       channel.unbind("error", handleError);
+      channel.unbind("chunk-progress", handleChunkProgress);
     };
-  }, [channel]);
+  }, [
+    channel,
+    currentSessionId,
+    expiresOption,
+    selectedDomain,
+    progress,
+    titleText,
+    saveSession,
+  ]);
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const files = e.target.files;
@@ -202,37 +198,34 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setError(null);
     setTitleText(sanitizedFileName);
     setFileInfo(formatBytes(fileToUpload.size));
-    setUploadStatus("");
     setFinalUrl(null);
 
     onFilesSelected?.(files);
     void uploadFile(fileToUpload);
   };
 
-  const uploadFileInChunks = async (
-    file: File,
-    fileId: string,
+  const uploadChunkWithRetry = async (
+    chunk: Blob,
+    chunkIndex: number,
     totalChunks: number,
-  ) => {
-    const failedChunks: number[] = [];
-
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const chunk = file.slice(start, end);
-
-      const chunkFormData = new FormData();
-      chunkFormData.append("file", chunk);
-      chunkFormData.append("chunkIndex", chunkIndex.toString());
-      chunkFormData.append("totalChunks", totalChunks.toString());
-      chunkFormData.append("fileId", fileId);
-      chunkFormData.append("fileName", file.name);
-      chunkFormData.append("fileType", file.type);
-      chunkFormData.append("fileSize", file.size.toString());
-      chunkFormData.append("expires", expiresOption);
-      chunkFormData.append("domain", selectedDomain);
-
+    fileId: string,
+    fileName: string,
+    fileType: string,
+    fileSize: number,
+  ): Promise<boolean> => {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
+        const chunkFormData = new FormData();
+        chunkFormData.append("file", chunk);
+        chunkFormData.append("chunkIndex", chunkIndex.toString());
+        chunkFormData.append("totalChunks", totalChunks.toString());
+        chunkFormData.append("fileId", fileId);
+        chunkFormData.append("fileName", fileName);
+        chunkFormData.append("fileType", fileType);
+        chunkFormData.append("fileSize", fileSize.toString());
+        chunkFormData.append("expires", expiresOption);
+        chunkFormData.append("domain", selectedDomain);
+
         const response = await fetch("/api/upload", {
           method: "POST",
           body: chunkFormData,
@@ -243,27 +236,73 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         }
 
         const data = await response.json();
-        const chunkProgress = Math.round(((chunkIndex + 1) / totalChunks) * 90);
-        setProgress(chunkProgress);
-      } catch (error) {
-        console.error(`Chunk ${chunkIndex} upload failed:`, error);
-        failedChunks.push(chunkIndex);
 
-        try {
-          const retryResponse = await fetch("/api/upload", {
-            method: "POST",
-            body: chunkFormData,
-          });
-
-          if (!retryResponse.ok) {
-            throw new Error(`Retry failed for chunk ${chunkIndex}`);
-          }
-
-          failedChunks.splice(failedChunks.indexOf(chunkIndex), 1);
-        } catch (retryError) {
-          throw new Error(`Failed to upload chunk ${chunkIndex} after retry`);
+        if (data.success) {
+          setUploadedChunks((prev) => prev + 1);
+          const chunkProgress = Math.round(
+            ((chunkIndex + 1) / totalChunks) * 90,
+          );
+          setProgress(chunkProgress);
+          return true;
+        } else {
+          throw new Error(`Chunk upload failed: ${data.error}`);
         }
+      } catch (error) {
+        console.error(
+          `Chunk ${chunkIndex} upload attempt ${attempt} failed:`,
+          error,
+        );
+
+        if (attempt === MAX_RETRIES) {
+          console.error(
+            `Chunk ${chunkIndex} failed after ${MAX_RETRIES} attempts`,
+          );
+          return false;
+        }
+
+        await delay(RETRY_DELAY * attempt);
       }
+    }
+    return false;
+  };
+
+  const uploadFileInChunks = async (
+    file: File,
+    fileId: string,
+    totalChunks: number,
+  ) => {
+    const failedChunks: number[] = [];
+
+    setTotalChunks(totalChunks);
+    setUploadedChunks(0);
+
+    const concurrentUploads = 3;
+    const chunksToUpload = Array.from({ length: totalChunks }, (_, i) => i);
+
+    while (chunksToUpload.length > 0) {
+      const currentBatch = chunksToUpload.splice(0, concurrentUploads);
+
+      const uploadPromises = currentBatch.map(async (chunkIndex) => {
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const success = await uploadChunkWithRetry(
+          chunk,
+          chunkIndex,
+          totalChunks,
+          fileId,
+          file.name,
+          file.type,
+          file.size,
+        );
+
+        if (!success) {
+          failedChunks.push(chunkIndex);
+        }
+      });
+
+      await Promise.all(uploadPromises);
     }
 
     if (failedChunks.length > 0) {
@@ -299,7 +338,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     try {
       setIsUploading(true);
       setProgress(0);
-      setUploadStatus("");
 
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       setCurrentSessionId(sessionId);
@@ -323,7 +361,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileId =
           Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-
         result = await uploadFileInChunks(file, fileId, totalChunks);
       } else {
         const formData = new FormData();
@@ -343,37 +380,37 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
 
         const data = await response.json();
         result = data.result;
-
         setProgress(100);
       }
 
-      setFinalUrl(result.publicUrl);
-      setProgress(100);
+      if (result && result.publicUrl) {
+        setFinalUrl(result.publicUrl);
+        setProgress(100);
 
-      saveSession({
-        id: sessionId,
-        status: "completed",
-        progress: 100,
-        filename: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        expiresField: expiresOption,
-        domain: selectedDomain,
-        result: result,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      });
+        saveSession({
+          id: sessionId,
+          status: "completed",
+          progress: 100,
+          filename: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+          expiresField: expiresOption,
+          domain: selectedDomain,
+          result: result,
+          updatedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        });
 
-      toast.success("Upload completed successfully.");
+        toast.success("Upload completed successfully.");
 
-      setTimeout(() => {
-        resetUploadState();
-      });
+        setTimeout(() => {
+          resetUploadState();
+        });
+      }
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
-      setUploadStatus("");
       toast.error(msg);
       setIsUploading(false);
     }
@@ -446,6 +483,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           <span className="text-sm md:text-base text-neutral-200/60">
             {fileInfo}
           </span>
+          {isUploading && totalChunks > 0 && (
+            <span className="text-xs text-neutral-200/40">
+              Uploaded {uploadedChunks} of {totalChunks} chunks
+            </span>
+          )}
           {error && <span className="text-xs text-red-600">{error}</span>}
         </div>
       </Button>
