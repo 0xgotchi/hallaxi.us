@@ -29,6 +29,8 @@ export type UploadBoxProps = {
   onFilesSelected?: (files: FileList) => void;
 };
 
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB chunks
+
 export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [titleText, setTitleText] = useState("Click here to select a file");
@@ -206,13 +208,77 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     void uploadFile(f);
   };
 
+  const uploadFileInChunks = async (
+    file: File,
+    fileId: string,
+    totalChunks: number,
+  ) => {
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      const chunkFormData = new FormData();
+      chunkFormData.append("file", chunk);
+      chunkFormData.append("chunkIndex", chunkIndex.toString());
+      chunkFormData.append("totalChunks", totalChunks.toString());
+      chunkFormData.append("fileId", fileId);
+      chunkFormData.append("fileName", file.name);
+      chunkFormData.append("fileType", file.type);
+      chunkFormData.append("fileSize", file.size.toString());
+      chunkFormData.append("expires", expiresOption);
+      chunkFormData.append("domain", selectedDomain);
+
+      try {
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: chunkFormData,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}`);
+        }
+
+        const data = await response.json();
+        const chunkProgress = Math.round(((chunkIndex + 1) / totalChunks) * 90);
+        setProgress(chunkProgress);
+        setUploadStatus(`Uploading chunks... ${chunkProgress}%`);
+      } catch (error) {
+        console.error(`Chunk ${chunkIndex} upload failed:`, error);
+        throw error;
+      }
+    }
+
+    // Finalizar upload
+    const finalizeFormData = new FormData();
+    finalizeFormData.append("finalize", "true");
+    finalizeFormData.append("fileId", fileId);
+    finalizeFormData.append("fileName", file.name);
+    finalizeFormData.append("fileType", file.type);
+    finalizeFormData.append("fileSize", file.size.toString());
+    finalizeFormData.append("expires", expiresOption);
+    finalizeFormData.append("domain", selectedDomain);
+
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: finalizeFormData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Finalize error ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.result;
+  };
+
   const uploadFile = async (file: File) => {
     try {
       setIsUploading(true);
       setProgress(0);
-      setUploadStatus("Starting upload...");
 
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      setCurrentSessionId(sessionId);
 
       saveSession({
         id: sessionId,
@@ -227,56 +293,62 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         updatedAt: new Date().toISOString(),
       });
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("expires", expiresOption);
-      formData.append("domain", selectedDomain);
+      let result;
 
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
+      if (file.size > 4 * 1024 * 1024) {
+        // Upload em chunks para arquivos grandes
+        setUploadStatus("Starting chunked upload...");
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const fileId =
+          Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+
+        result = await uploadFileInChunks(file, fileId, totalChunks);
+      } else {
+        // Upload tradicional para arquivos pequenos
+        setUploadStatus("Uploading...");
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("expires", expiresOption);
+        formData.append("domain", selectedDomain);
+
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error ${response.status}`);
+        }
+
+        const data = await response.json();
+        result = data.result;
+      }
+
+      setFinalUrl(result.publicUrl);
+      setProgress(100);
+      setUploadStatus("Upload completed!");
+
+      saveSession({
+        id: sessionId,
+        status: "completed",
+        progress: 100,
+        filename: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        expiresField: expiresOption,
+        domain: selectedDomain,
+        result: result,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error ${response.status}`);
-      }
+      toast.success("Upload completed successfully.");
 
-      const data = await response.json();
-
-      if (data.sessionId) {
-        setCurrentSessionId(data.sessionId);
-        setUploadStatus("Upload started...");
-
-        if (data.status === "completed" && data.result) {
-          setFinalUrl(data.result.publicUrl);
-          setProgress(100);
-          setUploadStatus("Upload completed!");
-          setIsUploading(false);
-          toast.success("Upload completed successfully.");
-
-          saveSession({
-            id: data.sessionId,
-            status: "completed",
-            progress: 100,
-            filename: file.name,
-            fileType: file.type,
-            fileSize: file.size,
-            expiresField: expiresOption,
-            domain: selectedDomain,
-            result: data.result,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
-          });
-
-          setTimeout(() => {
-            resetUploadState();
-          }, 3000);
-        }
-      } else {
-        throw new Error("No session ID received");
-      }
+      setTimeout(() => {
+        resetUploadState();
+      }, 3000);
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Upload failed";
       setError(msg);
