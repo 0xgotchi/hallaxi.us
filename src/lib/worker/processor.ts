@@ -26,7 +26,7 @@ interface ChunkData {
 }
 
 const chunkStorage = new Map<string, ChunkData>();
-const CHUNK_EXPIRY_TIME = 5 * 60 * 1000;
+const CHUNK_EXPIRY_TIME = 10 * 60 * 1000;
 
 const sanitizeFileName = (fileName: string): string => {
   return fileName.replace(/\s+/g, "_");
@@ -35,14 +35,18 @@ const sanitizeFileName = (fileName: string): string => {
 setInterval(
   () => {
     const now = Date.now();
+    let cleaned = 0;
     for (const [fileId, chunkData] of chunkStorage.entries()) {
       if (now - chunkData.lastActivity > CHUNK_EXPIRY_TIME) {
-        console.log(`Cleaning up expired chunks for file: ${fileId}`);
         chunkStorage.delete(fileId);
+        cleaned++;
       }
     }
+    if (cleaned > 0) {
+      console.log(`Cleaned up ${cleaned} expired chunk sessions`);
+    }
   },
-  5 * 60 * 1000,
+  2 * 60 * 1000,
 );
 
 export async function processUploadJob(jobData: any) {
@@ -83,9 +87,7 @@ export async function processUploadJob(jobData: any) {
     const fileBuffer = Buffer.from(file.buffer, "base64");
     const key = `${id}/${sanitizedFileName}`;
 
-    if (file.size > 1024 * 1024) {
-      await reportProgress(sessionId, 10);
-    }
+    await reportProgress(sessionId, 50);
 
     await r2.send(
       new PutObjectCommand({
@@ -111,20 +113,16 @@ export async function processUploadJob(jobData: any) {
       completed: true,
     };
 
-    if (file.size > 1024 * 1024) {
-      await reportProgress(sessionId, 100);
-      await sendResult(sessionId, finalResult);
-    }
+    await reportProgress(sessionId, 100);
+    await sendResult(sessionId, finalResult);
 
     return finalResult;
   } catch (error) {
     console.error(`Upload failed for ${sessionId}:`, error);
-    if (file.size > 1024 * 1024) {
-      await sendError(
-        sessionId,
-        error instanceof Error ? error.message : "Upload failed",
-      );
-    }
+    await sendError(
+      sessionId,
+      error instanceof Error ? error.message : "Upload failed",
+    );
     throw error;
   }
 }
@@ -146,6 +144,7 @@ export async function processChunkedUpload(jobData: any) {
     const sanitizedFileName = sanitizeFileName(fileName);
 
     if (!chunkStorage.has(fileId)) {
+      console.log(`Creating new chunk storage for: ${fileId}`);
       chunkStorage.set(fileId, {
         chunks: new Map(),
         fileName: sanitizedFileName,
@@ -154,7 +153,7 @@ export async function processChunkedUpload(jobData: any) {
         expiresField,
         submittedDomain,
         createdAt: Date.now(),
-        totalChunks: chunk.total,
+        totalChunks,
         receivedChunks: new Set(),
         lastActivity: Date.now(),
       });
@@ -168,11 +167,10 @@ export async function processChunkedUpload(jobData: any) {
     fileData.lastActivity = Date.now();
 
     if (fileData.receivedChunks.has(chunk.index)) {
-      console.log(`Chunk ${chunk.index} already received for file ${fileId}`);
+      console.log(`Chunk ${chunk.index} already received for ${fileId}`);
       return {
         success: true,
         chunkIndex: chunk.index,
-        duplicated: true,
         receivedChunks: fileData.receivedChunks.size,
         totalChunks: fileData.totalChunks,
       };
@@ -182,13 +180,12 @@ export async function processChunkedUpload(jobData: any) {
     fileData.receivedChunks.add(chunk.index);
 
     console.log(
-      `Received chunk ${chunk.index + 1}/${fileData.totalChunks} for file ${fileId}`,
+      `Received chunk ${chunk.index + 1}/${fileData.totalChunks} for ${fileId}, total: ${fileData.receivedChunks.size}`,
     );
 
-    const progress =
-      Math.round((fileData.receivedChunks.size / fileData.totalChunks) * 80) +
-      10;
-
+    const progress = Math.round(
+      (fileData.receivedChunks.size / fileData.totalChunks) * 100,
+    );
     await reportProgress(sessionId, progress);
 
     return {
@@ -229,9 +226,7 @@ export async function finalizeChunkedUpload(jobData: any) {
 
     const fileData = chunkStorage.get(fileId);
     if (!fileData) {
-      throw new Error(
-        "File chunks not found - possible timeout or server restart",
-      );
+      throw new Error("File chunks not found - upload session expired");
     }
 
     const missingChunks = [];
@@ -241,13 +236,17 @@ export async function finalizeChunkedUpload(jobData: any) {
       }
     }
 
+    console.log(
+      `Finalizing ${fileId}: ${fileData.receivedChunks.size}/${fileData.totalChunks} chunks received`,
+    );
+
     if (missingChunks.length > 0) {
       throw new Error(
-        `Missing ${missingChunks.length} chunks: ${missingChunks.join(", ")}. Received ${fileData.receivedChunks.size} of ${fileData.totalChunks}`,
+        `Missing ${missingChunks.length} chunks: ${missingChunks.slice(0, 10).join(", ")}${missingChunks.length > 10 ? "..." : ""}. Received ${fileData.receivedChunks.size} of ${fileData.totalChunks}`,
       );
     }
 
-    await reportProgress(sessionId, 92);
+    await reportProgress(sessionId, 100);
 
     const chunks: Buffer[] = [];
     for (let i = 0; i < fileData.totalChunks; i++) {
@@ -289,11 +288,9 @@ export async function finalizeChunkedUpload(jobData: any) {
       },
     });
 
-    await reportProgress(sessionId, 95);
-
     const key = `${id}/${sanitizedFileName}`;
 
-    if (fileSize <= 5 * 1024 * 1024) {
+    if (fileSize <= 10 * 1024 * 1024) {
       await r2.send(
         new PutObjectCommand({
           Bucket: bucket,
@@ -305,8 +302,6 @@ export async function finalizeChunkedUpload(jobData: any) {
     } else {
       await processMultipartUploadFinal(r2, bucket, key, fileType, fileBuffer);
     }
-
-    await reportProgress(sessionId, 98);
 
     await prisma.upload.update({
       where: { id },
@@ -325,12 +320,9 @@ export async function finalizeChunkedUpload(jobData: any) {
       completed: true,
     };
 
-    await reportProgress(sessionId, 100);
     await sendResult(sessionId, finalResult);
 
-    console.log(
-      `Successfully finalized upload for session ${sessionId}, file: ${sanitizedFileName}`,
-    );
+    console.log(`Successfully finalized upload: ${sanitizedFileName}`);
 
     return finalResult;
   } catch (error) {
@@ -384,8 +376,7 @@ async function processMultipartUploadFinal(
             }),
           )
           .then((res: { ETag?: string }) => {
-            const ETag = res.ETag;
-            parts.push({ ETag, PartNumber: partNumber });
+            parts.push({ ETag: res.ETag, PartNumber: partNumber });
           }),
       );
     }
