@@ -58,7 +58,6 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const {
     progress,
     isComplete,
-    isLoading,
     error: progressError,
     receivedChunks,
     totalChunks,
@@ -311,7 +310,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
           await hallaxiusClient.reportComplete(fileId, result);
 
           toast.success("Upload completed successfully.");
-          setTimeout(() => resetUploadState(), 500);
+          setTimeout(() => resetUploadState());
         }
       }
     } catch (e: any) {
