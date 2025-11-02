@@ -1,162 +1,88 @@
+import { type NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+import { getR2Client } from "@/lib/r2";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { generateSlug, generateSnowflakeId } from "@/lib/utils";
+import { computeExpiresAt, validateFile } from "@/config/upload";
+import { allowedDomains, buildPublicUrl } from "@/config/domain";
+
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-import { NextRequest, NextResponse } from "next/server";
-import { validateFile } from "@/config/upload";
-import {
-  processUploadJob,
-  processChunkedUpload,
-  finalizeChunkedUpload,
-} from "@/lib/worker/processor";
-
-const CHUNK_SIZE = 4 * 1024 * 1024;
-
-const sanitizeFileName = (fileName: string): string => {
-  return fileName.replace(/\s+/g, "_");
-};
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const file = formData.get("file");
-    const chunkIndex = formData.get("chunkIndex");
-    const totalChunks = formData.get("totalChunks");
-    const fileId = formData.get("fileId");
+    const file = formData.get("file") as File;
     const expiresField = String(formData.get("expires") ?? "7d");
     const submittedDomain = String(formData.get("domain") ?? "");
-    let fileName = String(formData.get("fileName") ?? "");
-    const fileType = String(formData.get("fileType") ?? "");
-    const fileSize = String(formData.get("fileSize") ?? "");
-
-    if (!fileName && file instanceof File) {
-      fileName = file.name;
-    }
-
-    const sanitizedFileName = sanitizeFileName(fileName);
-
-    if (chunkIndex !== null && totalChunks !== null && fileId !== null) {
-      const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      if (!(file instanceof File)) {
-        return NextResponse.json(
-          { error: "File chunk not provided" },
-          { status: 400 },
-        );
-      }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      const result = await processChunkedUpload({
-        sessionId,
-        chunk: {
-          data: buffer.toString("base64"),
-          index: parseInt(chunkIndex as string),
-          total: parseInt(totalChunks as string),
-        },
-        fileId: fileId as string,
-        fileName: sanitizedFileName,
-        fileType,
-        fileSize: parseInt(fileSize),
-        expiresField,
-        submittedDomain,
-        totalChunks: parseInt(totalChunks as string),
-      });
-
-      return NextResponse.json({
-        success: true,
-        chunkIndex: parseInt(chunkIndex as string),
-        receivedChunks: result.receivedChunks,
-        totalChunks: result.totalChunks,
-      });
-    }
-
-    const isFinalize = formData.get("finalize");
-    if (isFinalize !== null && fileId !== null) {
-      const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      const result = await finalizeChunkedUpload({
-        sessionId,
-        fileId: fileId as string,
-        fileName: sanitizedFileName,
-        fileType,
-        fileSize: parseInt(fileSize),
-        expiresField,
-        submittedDomain,
-      });
-
-      return NextResponse.json({
-        status: "completed",
-        sessionId,
-        result,
-      });
-    }
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "File not provided" }, { status: 400 });
     }
 
-    const sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    let fileToProcess = file;
-    if (sanitizedFileName !== file.name) {
-      fileToProcess = new File([file], sanitizedFileName, {
-        type: file.type,
-        lastModified: file.lastModified,
-      });
-    }
-
-    const { valid, error } = validateFile(fileToProcess);
+    const { valid, error } = validateFile(file);
     if (!valid) return NextResponse.json({ error }, { status: 400 });
 
-    if (fileToProcess.size <= 4 * 1024 * 1024) {
-      const arrayBuffer = await fileToProcess.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+    const domain = allowedDomains.includes(submittedDomain as any)
+      ? submittedDomain
+      : allowedDomains[0];
 
-      const result = await processUploadJob({
-        sessionId,
-        file: {
-          name: sanitizedFileName,
-          type: fileToProcess.type,
-          size: fileToProcess.size,
-          buffer: buffer.toString("base64"),
-        },
-        expiresField,
-        submittedDomain,
-      });
+    const slug = generateSlug();
+    const id = generateSnowflakeId();
 
-      return NextResponse.json({
-        status: "completed",
-        sessionId,
-        result,
-      });
-    } else {
-      const fileId = generateSnowflakeId();
-      const totalChunks = Math.ceil(fileToProcess.size / CHUNK_SIZE);
+    const now = new Date();
+    const expiresAt = computeExpiresAt(expiresField, now);
 
-      return NextResponse.json({
-        status: "chunked_started",
-        sessionId,
-        fileId,
-        totalChunks,
-        chunkSize: CHUNK_SIZE,
-      });
-    }
-  } catch (err: any) {
-    console.error("Upload error:", err);
-    return NextResponse.json(
-      {
-        error: err.message || "Upload failed",
+    const r2 = getR2Client();
+    const bucket = process.env.R2_BUCKET!;
+    const sanitizedFileName = file.name.replace(/\s+/g, "_");
+    const key = `${id}/${sanitizedFileName}`;
+
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+
+    console.log(
+      `Uploading file: ${sanitizedFileName} (${fileBuffer.length} bytes) to domain: ${domain}`,
+    );
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: fileBuffer,
+        ContentType: file.type,
+      }),
+    );
+
+    const upload = await prisma.upload.create({
+      data: {
+        id,
+        filename: sanitizedFileName,
+        type: file.type,
+        url: slug,
+        uploadAt: now,
+        expiresAt,
+        domain,
+        r2Key: key,
       },
+    });
+
+    console.log(`Upload completed: ${slug} on ${domain}`);
+
+    return NextResponse.json({
+      id: upload.id,
+      slug: upload.url,
+      filename: upload.filename,
+      size: file.size,
+      type: file.type,
+      url: `/${upload.url}`,
+      publicUrl: buildPublicUrl(upload.url, domain),
+      completed: true,
+    });
+  } catch (error) {
+    console.error("Upload error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Upload failed" },
       { status: 500 },
     );
   }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 200 });
-}
-
-function generateSnowflakeId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }

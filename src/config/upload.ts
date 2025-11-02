@@ -132,11 +132,25 @@ export const accept = uploadConfig.allowedExtensions.join(",");
 export const defaultExpiresDays = 7;
 
 export function computeExpiresAt(
+  expiresField: string,
   from: Date = new Date(),
-  days = defaultExpiresDays,
-) {
+): Date {
   const d = new Date(from);
-  d.setDate(d.getDate() + days);
+
+  if (expiresField.endsWith("d")) {
+    const days = parseInt(expiresField.slice(0, -1)) || defaultExpiresDays;
+    d.setDate(d.getDate() + days);
+  } else if (expiresField.endsWith("h")) {
+    const hours = parseInt(expiresField.slice(0, -1)) || 24;
+    d.setHours(d.getHours() + hours);
+  } else if (expiresField.endsWith("m")) {
+    const minutes = parseInt(expiresField.slice(0, -1)) || 60;
+    d.setMinutes(d.getMinutes() + minutes);
+  } else {
+    const days = parseInt(expiresField) || defaultExpiresDays;
+    d.setDate(d.getDate() + days);
+  }
+
   return d;
 }
 
