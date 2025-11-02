@@ -14,23 +14,47 @@ export class PostgresChunkStorage {
     fileSize: number;
     totalChunks: number;
   }): Promise<void> {
-    try {
-      await prisma.chunkSession.create({
-        data: {
-          id: data.fileId,
-          fileId: data.fileId,
-          fileName: data.fileName,
-          fileType: data.fileType,
-          fileSize: data.fileSize,
-          totalChunks: data.totalChunks,
-        },
-      });
-    } catch (error: any) {
-      if (error.code === "P2002") {
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await prisma.chunkSession.create({
+          data: {
+            id: data.fileId,
+            fileId: data.fileId,
+            fileName: data.fileName,
+            fileType: data.fileType,
+            fileSize: data.fileSize,
+            totalChunks: data.totalChunks,
+          },
+        });
         return;
+      } catch (error: any) {
+        lastError = error;
+
+        if (error.code === "P2002") {
+          const existingSession = await prisma.chunkSession.findUnique({
+            where: { id: data.fileId },
+          });
+
+          if (existingSession) {
+            return;
+          }
+
+          await new Promise((resolve) =>
+            setTimeout(resolve, 100 * (attempt + 1)),
+          );
+          continue;
+        }
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, 100 * (attempt + 1)),
+        );
       }
-      throw error;
     }
+
+    throw lastError || new Error("Failed to create session after retries");
   }
 
   static async addChunk(
@@ -45,12 +69,26 @@ export class PostgresChunkStorage {
     const r2 = getR2Client();
     const bucket = process.env.R2_BUCKET!;
 
-    const session = await prisma.chunkSession.findUnique({
-      where: { id: fileId },
-    });
+    let session;
+    let retries = 3;
+
+    while (retries > 0) {
+      session = await prisma.chunkSession.findUnique({
+        where: { id: fileId },
+      });
+
+      if (session) break;
+
+      if (chunkIndex === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries--;
+      } else {
+        break;
+      }
+    }
 
     if (!session) {
-      throw new Error("Session not found");
+      throw new Error(`Session not found for fileId: ${fileId}`);
     }
 
     const existingChunk = await prisma.chunkRecord.findUnique({

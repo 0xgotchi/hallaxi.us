@@ -194,39 +194,71 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     fileType: string,
     fileSize: number,
   ): Promise<boolean> => {
-    try {
-      const chunkFormData = new FormData();
-      chunkFormData.append("chunk", chunk);
-      chunkFormData.append("chunkIndex", chunkIndex.toString());
-      chunkFormData.append("totalChunks", totalChunks.toString());
-      chunkFormData.append("fileId", fileId);
-      chunkFormData.append("fileName", fileName);
-      chunkFormData.append("fileType", fileType);
-      chunkFormData.append("fileSize", fileSize.toString());
+    const maxRetries = 3;
 
-      const response = await fetch("/api/upload/chunk", {
-        method: "POST",
-        body: chunkFormData,
-      });
-      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const chunkFormData = new FormData();
+        chunkFormData.append("chunk", chunk);
+        chunkFormData.append("chunkIndex", chunkIndex.toString());
+        chunkFormData.append("totalChunks", totalChunks.toString());
+        chunkFormData.append("fileId", fileId);
+        chunkFormData.append("fileName", fileName);
+        chunkFormData.append("fileType", fileType);
+        chunkFormData.append("fileSize", fileSize.toString());
 
-      const data = await response.json();
-      if (data.success) {
-        await hallaxiusClient.reportProgress({
-          fileId,
-          progress: data.progress,
-          receivedChunks: data.receivedChunks,
-          totalChunks: data.totalChunks,
-          isComplete: data.isComplete,
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch("/api/upload/chunk", {
+          method: "POST",
+          body: chunkFormData,
+          signal: controller.signal,
         });
 
-        return true;
-      } else {
-        throw new Error(`Chunk upload failed: ${data.error}`);
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          if (response.status === 500 && attempt < maxRetries - 1) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000 * (attempt + 1)),
+            );
+            continue;
+          }
+          throw new Error(`HTTP error ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success) {
+          await hallaxiusClient.reportProgress({
+            fileId,
+            progress: data.progress,
+            receivedChunks: data.receivedChunks,
+            totalChunks: data.totalChunks,
+            isComplete: data.isComplete,
+          });
+
+          return true;
+        } else {
+          throw new Error(`Chunk upload failed: ${data.error}`);
+        }
+      } catch (error) {
+        console.warn(
+          `Chunk ${chunkIndex} upload attempt ${attempt + 1} failed:`,
+          error,
+        );
+
+        if (attempt === maxRetries - 1) {
+          return false;
+        }
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * (attempt + 1)),
+        );
       }
-    } catch (error) {
-      return false;
     }
+
+    return false;
   };
 
   const uploadFileInChunks = async (

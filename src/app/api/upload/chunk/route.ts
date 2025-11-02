@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
 import { PostgresChunkStorage } from "@/lib/storage";
 
 export const maxDuration = 60;
@@ -32,6 +33,22 @@ export async function POST(req: NextRequest) {
       `Receiving chunk ${chunkIndex + 1}/${totalChunks} for file ${fileId}`,
     );
 
+    if (chunkIndex > 0) {
+      const existingSession = await prisma.chunkSession.findUnique({
+        where: { id: fileId },
+      });
+
+      if (!existingSession) {
+        console.warn(
+          `Session not found for file ${fileId}, chunk ${chunkIndex}`,
+        );
+        return NextResponse.json(
+          { error: "Session not found. Please restart upload." },
+          { status: 404 },
+        );
+      }
+    }
+
     if (chunkIndex === 0) {
       try {
         await PostgresChunkStorage.createSession({
@@ -44,14 +61,12 @@ export async function POST(req: NextRequest) {
         console.log(`Session created for file ${fileId}`);
       } catch (error: any) {
         if (
-          error.code === "P2002" ||
-          error.message?.includes("Unique constraint")
+          !error.code?.startsWith("P2") &&
+          !error.message?.includes("Unique constraint")
         ) {
-          console.log(`Session already exists for file ${fileId}`);
-        } else {
-          console.error("Session creation error:", error);
           throw error;
         }
+        console.log(`Session already exists for file ${fileId}`);
       }
     }
 
