@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { PostgresChunkStorage } from "@/lib/chunk/storage";
-import { reportProgress } from "@/lib/realtime";
+import { PostgresChunkStorage } from "@/lib/storage";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest) {
     const fileName = formData.get("fileName") as string;
     const fileType = formData.get("fileType") as string;
     const fileSize = parseInt(formData.get("fileSize") as string);
-    const sessionId = formData.get("sessionId") as string;
+
     if (
       !chunk ||
       isNaN(chunkIndex) ||
@@ -41,12 +40,12 @@ export async function POST(req: NextRequest) {
         fileSize,
         totalChunks,
       });
-      console.log(`Created new session for fileId: ${fileId}`);
     } catch (error: any) {
-      if (!error.message?.includes("Unique constraint")) {
-        console.log(
-          `Session creation skipped for fileId: ${fileId} - ${error.message}`,
-        );
+      if (
+        !error.message?.includes("Unique constraint") &&
+        !error.code?.includes("P2002")
+      ) {
+        console.log(`Session creation error: ${error.message}`);
       }
     }
 
@@ -56,17 +55,6 @@ export async function POST(req: NextRequest) {
       chunkIndex,
       chunkBuffer,
     );
-
-    console.log(
-      `Chunk ${chunkIndex} processed. Progress: ${result.receivedChunks}/${result.totalChunks}`,
-    );
-
-    if (sessionId) {
-      const progress = Math.round(
-        (result.receivedChunks / result.totalChunks) * 100,
-      );
-      await reportProgress(sessionId, progress);
-    }
 
     return NextResponse.json({
       success: true,

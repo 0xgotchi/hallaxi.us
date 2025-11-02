@@ -14,6 +14,7 @@ export interface UploadSession {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  fileId?: string;
 }
 
 export function useUploadSession() {
@@ -49,11 +50,49 @@ export function useUploadSession() {
     localStorage.setItem("uploadSessions", JSON.stringify(active));
   };
 
+  const updateSessionProgress = (id: string, progress: number) => {
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === id
+          ? { ...session, progress, updatedAt: new Date().toISOString() }
+          : session,
+      ),
+    );
+    localStorage.setItem("uploadSessions", JSON.stringify(sessions));
+  };
+
+  const updateSessionStatus = (
+    id: string,
+    status: UploadSession["status"],
+    result?: any,
+  ) => {
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === id
+          ? {
+              ...session,
+              status,
+              result,
+              progress: status === "completed" ? 100 : session.progress,
+              completedAt:
+                status === "completed"
+                  ? new Date().toISOString()
+                  : session.completedAt,
+              updatedAt: new Date().toISOString(),
+            }
+          : session,
+      ),
+    );
+    localStorage.setItem("uploadSessions", JSON.stringify(sessions));
+  };
+
   return {
     sessions,
     saveSession,
     getSession,
     removeSession,
     clearCompleted,
+    updateSessionProgress,
+    updateSessionStatus,
   };
 }

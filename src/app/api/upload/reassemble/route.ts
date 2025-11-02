@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { PostgresChunkStorage } from "@/lib/chunk/storage";
+import { PostgresChunkStorage } from "@/lib/storage";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
 import { PutObjectCommand } from "@aws-sdk/client-s3";

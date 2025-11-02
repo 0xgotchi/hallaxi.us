@@ -13,7 +13,6 @@ export class PostgresChunkStorage {
     fileType: string;
     fileSize: number;
     totalChunks: number;
-    userId: string;
   }): Promise<void> {
     try {
       await prisma.chunkSession.create({
@@ -24,7 +23,6 @@ export class PostgresChunkStorage {
           fileType: data.fileType,
           fileSize: data.fileSize,
           totalChunks: data.totalChunks,
-          userId: data.userId,
         },
       });
     } catch (error: any) {
@@ -136,9 +134,7 @@ export class PostgresChunkStorage {
     return { chunks, session };
   }
 
-  static async getProgress(
-    fileId: string,
-  ): Promise<{
+  static async getProgress(fileId: string): Promise<{
     receivedChunks: number;
     totalChunks: number;
     progress: number;

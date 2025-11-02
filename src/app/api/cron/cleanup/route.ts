@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PostgresChunkStorage } from "@/lib/chunk/storage";
+import { PostgresChunkStorage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
