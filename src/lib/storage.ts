@@ -75,7 +75,6 @@ export class PostgresChunkStorage {
 
       await prisma.chunkRecord.create({
         data: {
-          id: `${fileId}-${chunkIndex}`,
           sessionId: fileId,
           chunkIndex: chunkIndex,
         },

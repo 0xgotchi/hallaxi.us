@@ -32,20 +32,23 @@ export async function POST(req: NextRequest) {
       `Receiving chunk ${chunkIndex + 1}/${totalChunks} for file ${fileId}`,
     );
 
-    try {
-      await PostgresChunkStorage.createSession({
-        fileId,
-        fileName: fileName.replace(/\s+/g, "_"),
-        fileType: fileType || "application/octet-stream",
-        fileSize,
-        totalChunks,
-      });
-    } catch (error: any) {
-      if (
-        !error.message?.includes("Unique constraint") &&
-        !error.code?.includes("P2002")
-      ) {
-        console.log(`Session creation error: ${error.message}`);
+    if (chunkIndex === 0) {
+      try {
+        await PostgresChunkStorage.createSession({
+          fileId,
+          fileName: fileName.replace(/\s+/g, "_"),
+          fileType: fileType || "application/octet-stream",
+          fileSize,
+          totalChunks,
+        });
+        console.log(`Session created for file ${fileId}`);
+      } catch (error: any) {
+        if (error.code === "P2002" || error.message?.includes("Unique constraint")) {
+          console.log(`Session already exists for file ${fileId}`);
+        } else {
+          console.error("Session creation error:", error);
+          throw error;
+        }
       }
     }
 
