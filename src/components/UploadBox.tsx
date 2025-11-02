@@ -208,7 +208,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         chunkFormData.append("fileSize", fileSize.toString());
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         const response = await fetch("/api/upload/chunk", {
           method: "POST",

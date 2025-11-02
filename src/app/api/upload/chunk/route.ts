@@ -1,6 +1,7 @@
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { PostgresChunkStorage } from "@/lib/storage";
+import { getR2Client } from "@/lib/r2";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -16,13 +17,7 @@ export async function POST(req: NextRequest) {
     const fileType = formData.get("fileType") as string;
     const fileSize = parseInt(formData.get("fileSize") as string);
 
-    if (
-      !chunk ||
-      isNaN(chunkIndex) ||
-      isNaN(totalChunks) ||
-      !fileId ||
-      !fileName
-    ) {
+    if (!chunk || isNaN(chunkIndex) || !fileId || !fileName) {
       return NextResponse.json(
         { error: "Missing required parameters" },
         { status: 400 },
@@ -30,60 +25,93 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(
-      `Receiving chunk ${chunkIndex + 1}/${totalChunks} for file ${fileId}`,
+      `Receiving chunk ${chunkIndex + 1}/${totalChunks} for ${fileId}`,
     );
 
-    if (chunkIndex > 0) {
+    const r2 = getR2Client();
+    const bucket = process.env.R2_BUCKET!;
+
+    if (chunkIndex === 0) {
+      await prisma.chunkSession.upsert({
+        where: { id: fileId },
+        update: {},
+        create: {
+          id: fileId,
+          fileId: fileId,
+          fileName: fileName.replace(/\s+/g, "_"),
+          fileType: fileType || "application/octet-stream",
+          fileSize: fileSize,
+          totalChunks: totalChunks,
+        },
+      });
+      console.log(`Session created/verified for ${fileId}`);
+    } else {
       const existingSession = await prisma.chunkSession.findUnique({
         where: { id: fileId },
       });
 
       if (!existingSession) {
         console.warn(
-          `Session not found for file ${fileId}, chunk ${chunkIndex}`,
+          `Session ${fileId} not found for chunk ${chunkIndex}, creating...`,
         );
-        return NextResponse.json(
-          { error: "Session not found. Please restart upload." },
-          { status: 404 },
-        );
-      }
-    }
-
-    if (chunkIndex === 0) {
-      try {
-        await PostgresChunkStorage.createSession({
-          fileId,
-          fileName: fileName.replace(/\s+/g, "_"),
-          fileType: fileType || "application/octet-stream",
-          fileSize,
-          totalChunks,
+        await prisma.chunkSession.upsert({
+          where: { id: fileId },
+          update: {},
+          create: {
+            id: fileId,
+            fileId: fileId,
+            fileName: fileName.replace(/\s+/g, "_"),
+            fileType: fileType || "application/octet-stream",
+            fileSize: fileSize,
+            totalChunks: totalChunks,
+          },
         });
-        console.log(`Session created for file ${fileId}`);
-      } catch (error: any) {
-        if (
-          !error.code?.startsWith("P2") &&
-          !error.message?.includes("Unique constraint")
-        ) {
-          throw error;
-        }
-        console.log(`Session already exists for file ${fileId}`);
       }
     }
 
+    const chunkKey = `chunks/${fileId}/${chunkIndex}`;
     const chunkBuffer = Buffer.from(await chunk.arrayBuffer());
-    const result = await PostgresChunkStorage.addChunk(
-      fileId,
-      chunkIndex,
-      chunkBuffer,
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: chunkKey,
+        Body: chunkBuffer,
+        ContentType: "application/octet-stream",
+      }),
     );
+
+    await prisma.chunkRecord.upsert({
+      where: {
+        sessionId_chunkIndex: {
+          sessionId: fileId,
+          chunkIndex: chunkIndex,
+        },
+      },
+      update: {},
+      create: {
+        sessionId: fileId,
+        chunkIndex: chunkIndex,
+      },
+    });
+
+    const receivedCount = await prisma.chunkRecord.count({
+      where: { sessionId: fileId },
+    });
+
+    const session = await prisma.chunkSession.findUnique({
+      where: { id: fileId },
+    });
 
     return NextResponse.json({
       success: true,
       chunkIndex,
-      receivedChunks: result.receivedChunks,
-      totalChunks: result.totalChunks,
-      isComplete: result.isComplete,
-      progress: Math.round((result.receivedChunks / result.totalChunks) * 100),
+      receivedChunks: receivedCount,
+      totalChunks: session?.totalChunks || totalChunks,
+      isComplete: receivedCount >= (session?.totalChunks || totalChunks),
+      progress: Math.round(
+        (receivedCount / (session?.totalChunks || totalChunks)) * 100,
+      ),
     });
   } catch (error) {
     console.error("Chunk upload error:", error);

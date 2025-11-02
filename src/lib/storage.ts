@@ -69,55 +69,38 @@ export class PostgresChunkStorage {
     const r2 = getR2Client();
     const bucket = process.env.R2_BUCKET!;
 
-    let session;
-    let retries = 3;
-
-    while (retries > 0) {
-      session = await prisma.chunkSession.findUnique({
-        where: { id: fileId },
-      });
-
-      if (session) break;
-
-      if (chunkIndex === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        retries--;
-      } else {
-        break;
-      }
-    }
+    const session = await prisma.chunkSession.findUnique({
+      where: { id: fileId },
+    });
 
     if (!session) {
-      throw new Error(`Session not found for fileId: ${fileId}`);
+      throw new Error(`Session ${fileId} not found in database`);
     }
 
-    const existingChunk = await prisma.chunkRecord.findUnique({
+    const chunkKey = `chunks/${fileId}/${chunkIndex}`;
+
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: chunkKey,
+        Body: chunkData,
+        ContentType: "application/octet-stream",
+      }),
+    );
+
+    await prisma.chunkRecord.upsert({
       where: {
         sessionId_chunkIndex: {
           sessionId: fileId,
           chunkIndex: chunkIndex,
         },
       },
+      update: {},
+      create: {
+        sessionId: fileId,
+        chunkIndex: chunkIndex,
+      },
     });
-
-    if (!existingChunk) {
-      const chunkKey = `chunks/${fileId}/${chunkIndex}`;
-      await r2.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: chunkKey,
-          Body: chunkData,
-          ContentType: "application/octet-stream",
-        }),
-      );
-
-      await prisma.chunkRecord.create({
-        data: {
-          sessionId: fileId,
-          chunkIndex: chunkIndex,
-        },
-      });
-    }
 
     const receivedCount = await prisma.chunkRecord.count({
       where: { sessionId: fileId },
