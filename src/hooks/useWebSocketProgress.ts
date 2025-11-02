@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { getWebSocketUrl } from '../lib/websocket';
 
 interface WebSocketMessage {
   type: "progress" | "complete" | "error" | "chunk_ack";
@@ -44,7 +45,7 @@ export function useWebSocketProgress(
         setIsLoading(true);
         setError(null);
 
-        const wsUrl = `ws://localhost:3070/ws/${fileId}`;
+        const wsUrl = getWebSocketUrl(`/ws/${fileId}`);
         const ws = new WebSocket(wsUrl);
 
         wsConnectionCache.set(fileId, ws);

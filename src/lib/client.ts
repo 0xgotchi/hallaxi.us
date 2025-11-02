@@ -1,3 +1,5 @@
+import { getWebSocketUrl } from './websocket';
+
 const HALLAXIUS_SERVER_URL =
   process.env.NEXT_PUBLIC_HALLAXIUS_SERVER_URL || "http://localhost:3070";
 
@@ -117,8 +119,7 @@ export const hallaxiusClient = {
   },
 
   getWebSocketUrl: (fileId: string) => {
-    const serverUrl = HALLAXIUS_SERVER_URL.replace(/^http/, "ws");
-    return `${serverUrl}/ws/${fileId}`;
+    return getWebSocketUrl(`/ws/${fileId}`);
   },
 
   getOrCreateWebSocket: (fileId: string): Promise<WebSocket> => {
@@ -134,7 +135,7 @@ export const hallaxiusClient = {
       }
 
       try {
-        const wsUrl = hallaxiusClient.getWebSocketUrl(fileId);
+        const wsUrl = getWebSocketUrl(`/ws/${fileId}`);
         const ws = new WebSocket(wsUrl);
 
         wsConnections.set(fileId, ws);
