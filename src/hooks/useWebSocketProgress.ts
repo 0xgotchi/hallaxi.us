@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { getWebSocketUrl } from '../lib/websocket';
+import { useEffect, useRef, useState } from "react";
+import { getWebSocketUrl } from "../lib/websocket";
 
 interface WebSocketMessage {
   type: "progress" | "complete" | "error" | "chunk_ack";
@@ -153,13 +153,14 @@ export function useWebSocketProgress(
 
     messageCallbackRef.current = (message: WebSocketMessage) => {
       switch (message.type) {
-        case "progress":
+        case "progress": {
           const progressData = message.data;
           setProgress(progressData.progress);
           setReceivedChunks(progressData.receivedChunks);
           setTotalChunks(progressData.totalChunks);
           setIsComplete(progressData.isComplete);
           break;
+        }
 
         case "complete":
           setIsComplete(true);
@@ -180,12 +181,13 @@ export function useWebSocketProgress(
         case "chunk_ack":
           break;
 
-        case "error":
+        case "error": {
           const errorData = message.data;
           setError(errorData.error);
           setIsComplete(false);
           setIsLoading(false);
           break;
+        }
       }
     };
 

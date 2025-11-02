@@ -1,4 +1,4 @@
-import { getWebSocketUrl } from './websocket';
+import { getWebSocketUrl } from "./websocket";
 
 const HALLAXIUS_SERVER_URL =
   process.env.NEXT_PUBLIC_HALLAXIUS_SERVER_URL || "http://localhost:3070";

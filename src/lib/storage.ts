@@ -1,10 +1,10 @@
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
-import {
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-} from "@aws-sdk/client-s3";
 
 export class PostgresChunkStorage {
   static async createSession(data: {
@@ -125,7 +125,7 @@ export class PostgresChunkStorage {
     }
 
     const chunkPromises = chunkRecords.map((record) =>
-      this.getChunk(fileId, record.chunkIndex),
+      PostgresChunkStorage.getChunk(fileId, record.chunkIndex),
     );
 
     const chunks = await Promise.all(chunkPromises);
@@ -207,7 +207,7 @@ export class PostgresChunkStorage {
     let cleanedCount = 0;
     for (const session of expiredSessions) {
       try {
-        await this.cleanup(session.id);
+        await PostgresChunkStorage.cleanup(session.id);
         cleanedCount++;
       } catch (error) {
         console.error(`Failed to cleanup session ${session.id}:`, error);

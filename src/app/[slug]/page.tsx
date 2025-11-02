@@ -56,5 +56,10 @@ export default async function SlugPage({ params }: SlugPageProps) {
     );
   }
 
-  redirect(`${process.env.R2_PUBLIC_BASE_URL}/${record.r2Key}`);
+  const r2KeyParts = record.r2Key.split("/");
+  const encodedR2Key = r2KeyParts
+    .map((part) => (part === r2KeyParts[0] ? part : encodeURIComponent(part)))
+    .join("/");
+
+  redirect(`${process.env.R2_PUBLIC_BASE_URL}/${encodedR2Key}`);
 }

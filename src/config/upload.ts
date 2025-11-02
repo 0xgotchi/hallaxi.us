@@ -130,6 +130,7 @@ export const uploadConfig: UploadConstraints = {
 
 export const accept = uploadConfig.allowedExtensions.join(",");
 export const defaultExpiresDays = 7;
+export const CHUNK_SIZE = 5 * 1024 * 1024;
 
 export function computeExpiresAt(
   expiresField: string,

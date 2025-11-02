@@ -43,7 +43,10 @@ export async function POST(req: NextRequest) {
         });
         console.log(`Session created for file ${fileId}`);
       } catch (error: any) {
-        if (error.code === "P2002" || error.message?.includes("Unique constraint")) {
+        if (
+          error.code === "P2002" ||
+          error.message?.includes("Unique constraint")
+        ) {
           console.log(`Session already exists for file ${fileId}`);
         } else {
           console.error("Session creation error:", error);

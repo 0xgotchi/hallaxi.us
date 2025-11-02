@@ -4,7 +4,8 @@
 @custom-variant dark (&:is(.dark *));
 
 body {
-  font-family: var(--font-sans),;
+  font-family: var(--font-sans);
+  @apply antialiased subpixel-antialiased text-base leading-relaxed tracking-wide;
 }
 
 @theme inline {

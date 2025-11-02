@@ -1,11 +1,11 @@
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
-import { PostgresChunkStorage } from "@/lib/storage";
+import { allowedDomains, buildPublicUrl } from "@/config/domain";
+import { computeExpiresAt } from "@/config/upload";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { PostgresChunkStorage } from "@/lib/storage";
 import { generateSlug } from "@/lib/utils";
-import { computeExpiresAt } from "@/config/upload";
-import { allowedDomains, buildPublicUrl } from "@/config/domain";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";

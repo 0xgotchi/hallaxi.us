@@ -1,10 +1,10 @@
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
+import { allowedDomains, buildPublicUrl } from "@/config/domain";
+import { computeExpiresAt, validateFile } from "@/config/upload";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { generateSlug, generateSnowflakeId } from "@/lib/utils";
-import { computeExpiresAt, validateFile } from "@/config/upload";
-import { allowedDomains, buildPublicUrl } from "@/config/domain";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

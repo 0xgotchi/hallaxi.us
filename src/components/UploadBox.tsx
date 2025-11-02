@@ -1,27 +1,28 @@
 "use client";
 
 import { Check, Clock, Copy, Globe } from "lucide-react";
-import { useRef, useState, useEffect } from "react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { FadeInUp } from "@/components/AnimatedPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FadeInUp } from "@/components/AnimatedPage";
-import { toast } from "sonner";
+import { Progress } from "@/components/ui/progress";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { type AllowedDomain, allowedDomains } from "@/config/domain";
+import {
+  CHUNK_SIZE,
   accept as defaultAccept,
   formatBytes,
   validateFile,
 } from "@/config/upload";
-import { allowedDomains, AllowedDomain } from "@/config/domain";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { useUploadProgress } from "@/hooks/useUploadProgress";
-import { Progress } from "@/components/ui/progress";
 import { hallaxiusClient } from "@/lib/client";
 import { generateSnowflakeId } from "@/lib/utils";
 
@@ -30,14 +31,8 @@ export type UploadBoxProps = {
   onFilesSelected?: (files: FileList) => void;
 };
 
-const CHUNK_SIZE = 4 * 1024 * 1024;
-const MAX_RETRIES = 5;
-const RETRY_DELAY = 1000;
-const CONCURRENT_UPLOADS = 2;
-
 const sanitizeFileName = (fileName: string): string =>
   fileName.replace(/\s+/g, "_");
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -52,6 +47,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     allowedDomains[0],
   );
   const [currentFileId, setCurrentFileId] = useState<string>("");
+  const [currentFileSize, setCurrentFileSize] = useState<number>(0);
 
   const effectiveAccept = accept ?? defaultAccept;
 
@@ -100,6 +96,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setFileInfo("Maximum file size: 500MB");
     setError(null);
     setCurrentFileId("");
+    setCurrentFileSize(0);
     setIsUploading(false);
     setAnimatedProgress(0);
     if (inputRef.current) inputRef.current.value = "";
@@ -134,12 +131,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       const data = await response.json();
       if (data && data.publicUrl) {
         setFinalUrl(data.publicUrl);
+        toast.success("Upload completed successfully.");
+        resetUploadState();
         setIsUploading(false);
 
         await hallaxiusClient.reportComplete(currentFileId, data);
-
-        toast.success("Upload completed successfully.");
-        setTimeout(() => resetUploadState());
       }
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : "Finalize failed";
@@ -182,13 +178,14 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     setError(null);
     setTitleText(sanitizedFileName);
     setFileInfo(formatBytes(fileToUpload.size));
+    setCurrentFileSize(fileToUpload.size);
     setFinalUrl(null);
     setAnimatedProgress(0);
     onFilesSelected?.(files);
     void uploadFile(fileToUpload);
   };
 
-  const uploadChunkWithRetry = async (
+  const uploadChunk = async (
     chunk: Blob,
     chunkIndex: number,
     totalChunks: number,
@@ -197,43 +194,39 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     fileType: string,
     fileSize: number,
   ): Promise<boolean> => {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const chunkFormData = new FormData();
-        chunkFormData.append("chunk", chunk);
-        chunkFormData.append("chunkIndex", chunkIndex.toString());
-        chunkFormData.append("totalChunks", totalChunks.toString());
-        chunkFormData.append("fileId", fileId);
-        chunkFormData.append("fileName", fileName);
-        chunkFormData.append("fileType", fileType);
-        chunkFormData.append("fileSize", fileSize.toString());
+    try {
+      const chunkFormData = new FormData();
+      chunkFormData.append("chunk", chunk);
+      chunkFormData.append("chunkIndex", chunkIndex.toString());
+      chunkFormData.append("totalChunks", totalChunks.toString());
+      chunkFormData.append("fileId", fileId);
+      chunkFormData.append("fileName", fileName);
+      chunkFormData.append("fileType", fileType);
+      chunkFormData.append("fileSize", fileSize.toString());
 
-        const response = await fetch("/api/upload/chunk", {
-          method: "POST",
-          body: chunkFormData,
+      const response = await fetch("/api/upload/chunk", {
+        method: "POST",
+        body: chunkFormData,
+      });
+      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+
+      const data = await response.json();
+      if (data.success) {
+        await hallaxiusClient.reportProgress({
+          fileId,
+          progress: data.progress,
+          receivedChunks: data.receivedChunks,
+          totalChunks: data.totalChunks,
+          isComplete: data.isComplete,
         });
-        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
 
-        const data = await response.json();
-        if (data.success) {
-          await hallaxiusClient.reportProgress({
-            fileId,
-            progress: data.progress,
-            receivedChunks: data.receivedChunks,
-            totalChunks: data.totalChunks,
-            isComplete: data.isComplete,
-          });
-
-          return true;
-        } else {
-          throw new Error(`Chunk upload failed: ${data.error}`);
-        }
-      } catch (error) {
-        if (attempt === MAX_RETRIES) return false;
-        await delay(RETRY_DELAY * attempt);
+        return true;
+      } else {
+        throw new Error(`Chunk upload failed: ${data.error}`);
       }
+    } catch (error) {
+      return false;
     }
-    return false;
   };
 
   const uploadFileInChunks = async (
@@ -242,31 +235,25 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     totalChunks: number,
   ) => {
     const failedChunks: number[] = [];
-    const chunksToUpload = Array.from({ length: totalChunks }, (_, i) => i);
 
-    while (chunksToUpload.length > 0) {
-      const currentBatch = chunksToUpload.splice(0, CONCURRENT_UPLOADS);
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
 
-      const uploadPromises = currentBatch.map(async (chunkIndex) => {
-        const start = chunkIndex * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunk = file.slice(start, end);
-        const success = await uploadChunkWithRetry(
-          chunk,
-          chunkIndex,
-          totalChunks,
-          fileId,
-          file.name,
-          file.type,
-          file.size,
-        );
-        if (!success) {
-          failedChunks.push(chunkIndex);
-        }
-      });
+      const success = await uploadChunk(
+        chunk,
+        chunkIndex,
+        totalChunks,
+        fileId,
+        file.name,
+        file.type,
+        file.size,
+      );
 
-      await Promise.all(uploadPromises);
-      if (chunksToUpload.length > 0) await delay(100);
+      if (!success) {
+        failedChunks.push(chunkIndex);
+      }
     }
 
     if (failedChunks.length > 0) {
@@ -305,12 +292,11 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         const result = await response.json();
         if (result && result.publicUrl) {
           setFinalUrl(result.publicUrl);
+          toast.success("Upload completed successfully.");
+          resetUploadState();
           setIsUploading(false);
 
           await hallaxiusClient.reportComplete(fileId, result);
-
-          toast.success("Upload completed successfully.");
-          setTimeout(() => resetUploadState());
         }
       }
     } catch (e: any) {
@@ -326,8 +312,17 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
     }
   };
 
+  const getChunkText = () => {
+    if (receivedChunks === totalChunks && totalChunks > 0) {
+      return "Processing";
+    }
+    return `${receivedChunks} of ${totalChunks} chunks`;
+  };
+
+  const showProgressBar = isUploading && currentFileSize > 5 * 1024 * 1024;
+
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className="w-full max-w-2xl lg:max-w-4xl mx-auto px-3 sm:px-4 md:px-6">
       <input
         ref={inputRef}
         type="file"
@@ -337,8 +332,8 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       />
 
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2 text-xs md:text-sm text-neutral-200/60 mb-2">
+        <div className="flex flex-col w-full md:w-auto">
+          <div className="flex items-center gap-2 text-sm text-neutral-200/60 mb-2">
             <Clock className="h-4 w-4" />
             <span>Expires</span>
           </div>
@@ -346,18 +341,27 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
             defaultValue="7d"
             value={expiresOption}
             onValueChange={setExpiresOption}
+            className="w-full max-w-[400px]"
           >
-            <TabsList>
-              <TabsTrigger value="1h">1h</TabsTrigger>
-              <TabsTrigger value="1d">1d</TabsTrigger>
-              <TabsTrigger value="7d">7d</TabsTrigger>
-              <TabsTrigger value="30d">30d</TabsTrigger>
+            <TabsList className="w-full">
+              <TabsTrigger value="1h" className="flex-1">
+                1h
+              </TabsTrigger>
+              <TabsTrigger value="1d" className="flex-1">
+                1d
+              </TabsTrigger>
+              <TabsTrigger value="7d" className="flex-1">
+                7d
+              </TabsTrigger>
+              <TabsTrigger value="30d" className="flex-1">
+                30d
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2 text-xs md:text-sm text-neutral-200/60 mb-2">
+        <div className="flex flex-col w-full md:w-auto">
+          <div className="flex items-center gap-2 text-sm text-neutral-200/60 mb-2">
             <Globe className="h-4 w-4" />
             <span>Domain</span>
           </div>
@@ -365,7 +369,7 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
             value={selectedDomain}
             onValueChange={(v) => setSelectedDomain(v as AllowedDomain)}
           >
-            <SelectTrigger className="w-64">
+            <SelectTrigger className="w-full sm:w-48 md:w-64">
               <SelectValue placeholder="Select domain" />
             </SelectTrigger>
             <SelectContent>
@@ -379,37 +383,49 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
         </div>
       </div>
 
-      <Button
-        type="button"
-        onClick={handleClick}
-        disabled={isUploading}
-        aria-label="Select file to upload"
-        className={`w-full border-2 border-dashed border-primary/20 rounded-2xl p-20 md:p-24 text-center cursor-pointer select-none bg-transparent duration-300 hover:bg-primary-foreground ${isUploading ? "opacity-60 cursor-not-allowed" : "hover:border-neutral-200/25"}`}
-      >
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-lg md:text-xl font-medium text-neutral-200/80">
-            {titleText}
-          </span>
-          <span className="text-sm md:text-base text-neutral-200/60">
-            {fileInfo}
-          </span>
-          {error && <span className="text-xs text-red-600">{error}</span>}
-        </div>
-      </Button>
-
-      {isUploading && (
-        <div className="mt-6 w-full">
-          <Progress value={animatedProgress} className="h-2 w-full" />
-          <div className="flex justify-between text-xs text-neutral-200/40 mt-2">
-            <span>{Math.round(animatedProgress)}%</span>
-            {totalChunks > 0 && (
-              <span>
-                {receivedChunks} of {totalChunks} chunks
+      <div className="w-full max-w-full overflow-hidden">
+        <Button
+          type="button"
+          onClick={handleClick}
+          disabled={isUploading}
+          aria-label="Select file to upload"
+          className={`w-full border-2 border-dashed border-primary/20 rounded-2xl p-16 sm:p-20 md:p-24 text-center cursor-pointer select-none bg-transparent duration-300 hover:bg-primary-foreground ${isUploading ? "opacity-60 cursor-not-allowed" : "hover:border-neutral-200/25"}`}
+        >
+          <div className="flex flex-col items-center gap-3 w-full">
+            <span className="text-base sm:text-lg md:text-xl font-medium text-neutral-200/80 max-w-full line-clamp-2 wrap-break-word px-2">
+              {titleText}
+            </span>
+            <span className="text-sm sm:text-base text-neutral-200/60">
+              {fileInfo}
+            </span>
+            {error && (
+              <span className="text-sm text-red-600 text-center max-w-full wrap-break-word px-2">
+                {error}
               </span>
             )}
           </div>
+        </Button>
+      </div>
+
+      {showProgressBar && (
+        <div className="mt-6 w-full max-w-full overflow-hidden">
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <div className="flex items-center gap-2 text-sm text-neutral-200/40 min-w-0 flex-1">
+              {totalChunks > 0 && (
+                <span className="text-xs sm:text-sm wrap-break-word truncate">
+                  {getChunkText()}
+                </span>
+              )}
+            </div>
+            <span className="text-xs sm:text-sm text-neutral-200/40 shrink-0">
+              {Math.round(animatedProgress)}%
+            </span>
+          </div>
+          <div className="w-full max-w-full">
+            <Progress value={animatedProgress} className="h-2 w-full" />
+          </div>
           {progressError && (
-            <div className="text-xs text-amber-500 mt-1">
+            <div className="text-xs sm:text-sm text-amber-500 mt-1 wrap-break-word max-w-full">
               WebSocket error: {progressError}
             </div>
           )}
@@ -417,41 +433,40 @@ export function UploadBox({ accept, onFilesSelected }: UploadBoxProps) {
       )}
 
       {finalUrl && !isUploading && (
-        <div className="mt-6">
+        <div className="mt-6 w-full max-w-full overflow-hidden">
           <FadeInUp>
-            <div className="flex items-center gap-2 select-none">
+            <div className="flex flex-col sm:flex-row items-center gap-2 select-none w-full">
               <Input
                 title={finalUrl}
                 aria-label="File URL"
                 readOnly
                 value={finalUrl}
                 onFocus={(e) => e.currentTarget.select()}
-                className="font-mono text-sm select-none"
+                className="font-mono text-xs sm:text-sm select-none w-full wrap-break-word"
               />
-              <div className="relative">
-                <Button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(finalUrl);
-                      setCopied(true);
-                      toast.success("Link copied.");
-                      setTimeout(() => setCopied(false), 1500);
-                    } catch {
-                      window.prompt("Copy the link:", finalUrl);
-                      setCopied(true);
-                      toast.success("Link copied.");
-                      setTimeout(() => setCopied(false), 1500);
-                    }
-                  }}
-                  className="h-10 w-10 inline-flex items-center justify-center rounded-lg border"
-                  aria-label={copied ? "Copied" : "Copy URL"}
-                  title={copied ? "Copied" : "Copy URL"}
-                  size="icon"
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                </Button>
-              </div>
+              <Button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(finalUrl);
+                    setCopied(true);
+                    toast.success("Link copied.");
+                    setTimeout(() => setCopied(false), 1500);
+                  } catch {
+                    window.prompt("Copy the link:", finalUrl);
+                    setCopied(true);
+                    toast.success("Link copied.");
+                    setTimeout(() => setCopied(false), 1500);
+                  }
+                }}
+                className="h-10 w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg border px-4 sm:px-3"
+                aria-label={copied ? "Copied" : "Copy URL"}
+                title={copied ? "Copied" : "Copy URL"}
+                size="default"
+              >
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+                <span className="sm:hidden">{copied ? "Copied" : "Copy"}</span>
+              </Button>
             </div>
           </FadeInUp>
         </div>
