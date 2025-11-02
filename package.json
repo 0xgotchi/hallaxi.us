@@ -1,6 +1,6 @@
 {
   "name": "hallaxi.us",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -9,6 +9,7 @@
     "lint": "biome check",
     "format": "biome format --write",
     "prisma:generate": "prisma generate",
+    "prisma:dbpush": "prisma db push",
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:studio": "prisma studio"
   },

@@ -16,8 +16,6 @@ export async function POST(req: NextRequest) {
     const fileType = formData.get("fileType") as string;
     const fileSize = parseInt(formData.get("fileSize") as string);
     const sessionId = formData.get("sessionId") as string;
-    const userId = (formData.get("userId") as string) || "anonymous";
-
     if (
       !chunk ||
       isNaN(chunkIndex) ||
@@ -42,7 +40,6 @@ export async function POST(req: NextRequest) {
         fileType: fileType || "application/octet-stream",
         fileSize,
         totalChunks,
-        userId,
       });
       console.log(`Created new session for fileId: ${fileId}`);
     } catch (error: any) {
