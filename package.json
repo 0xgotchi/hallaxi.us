@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun run next dev --turbopack",
     "build": "next build",
-    "build:cf": "npx opennextjs-cloudflare build --yes",
+    "build:cf": "prisma generate && npx opennextjs-cloudflare build --yes",
     "start": "bun run next start",
     "preview:cf": "npx opennextjs-cloudflare preview",
     "deploy:cf": "npx opennextjs-cloudflare deploy",
