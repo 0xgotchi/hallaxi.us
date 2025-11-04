@@ -145,7 +145,7 @@ export class PostgresChunkStorage {
       throw new Error("Session not found");
     }
 
-    const chunkPromises = chunkRecords.map((record) =>
+    const chunkPromises = chunkRecords.map((record: { chunkIndex: number }) =>
       PostgresChunkStorage.getChunk(fileId, record.chunkIndex),
     );
 
@@ -188,19 +188,21 @@ export class PostgresChunkStorage {
         where: { sessionId: fileId },
       });
 
-      const deletePromises = chunkRecords.map(async (record) => {
-        const chunkKey = `chunks/${fileId}/${record.chunkIndex}`;
-        try {
-          await r2.send(
-            new DeleteObjectCommand({
-              Bucket: bucket,
-              Key: chunkKey,
-            }),
-          );
-        } catch (error) {
-          console.warn(`Failed to delete chunk ${chunkKey}:`, error);
-        }
-      });
+      const deletePromises = chunkRecords.map(
+        async (record: { chunkIndex: number }) => {
+          const chunkKey = `chunks/${fileId}/${record.chunkIndex}`;
+          try {
+            await r2.send(
+              new DeleteObjectCommand({
+                Bucket: bucket,
+                Key: chunkKey,
+              }),
+            );
+          } catch (error) {
+            console.warn(`Failed to delete chunk ${chunkKey}:`, error);
+          }
+        },
+      );
 
       await Promise.all(deletePromises);
 
