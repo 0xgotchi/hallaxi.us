@@ -1,3 +1,5 @@
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
 import { allowedDomains, buildPublicUrl } from "@/config/domain";
@@ -8,7 +10,6 @@ import { PostgresChunkStorage } from "@/lib/storage";
 import { generateSlug } from "@/lib/utils";
 
 export const maxDuration = 300;
-export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {

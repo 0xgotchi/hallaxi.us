@@ -1,3 +1,5 @@
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
 import { allowedDomains, buildPublicUrl } from "@/config/domain";
@@ -6,7 +8,6 @@ import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
 import { generateSlug, generateSnowflakeId } from "@/lib/utils";
 
-export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {

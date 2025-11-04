@@ -1,3 +1,5 @@
+export const runtime = "edge";
+
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import ErrorPage from "@/components/page/ErrorPage";
@@ -41,8 +43,8 @@ export default async function SlugPage({ params }: SlugPageProps) {
     );
   }
 
-  const headersList = await headers();
-  const currentDomain = headersList.get("host");
+  const headersList = headers();
+  const currentDomain = (await headersList).get("host");
 
   if (
     !currentDomain ||
@@ -58,7 +60,9 @@ export default async function SlugPage({ params }: SlugPageProps) {
 
   const r2KeyParts = record.r2Key.split("/");
   const encodedR2Key = r2KeyParts
-    .map((part) => (part === r2KeyParts[0] ? part : encodeURIComponent(part)))
+    .map((part: string, index: number) =>
+      index === 0 ? part : encodeURIComponent(part),
+    )
     .join("/");
 
   redirect(`${process.env.R2_PUBLIC_BASE_URL}/${encodedR2Key}`);
