@@ -1,13 +1,13 @@
 {
   "name": "hallaxi.us",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "scripts": {
     "dev": "bun run next dev --turbopack",
-    "build": "bun run next build --turbopack",
+    "build": "npx opennext-cloudflare build",
     "start": "bun run next start",
-    "preview:cf": "bun run opennext build && bun run opennext preview",
-    "deploy:cf": "bun run opennext build && bun run opennext deploy",
+    "preview:cf": "npx opennext-cloudflare preview",
+    "deploy:cf": "npx opennext-cloudflare deploy",
     "lint": "biome check",
     "format": "biome format --write",
     "prisma:generate": "prisma generate",
