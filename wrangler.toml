@@ -1,9 +1,6 @@
 name = "hallaxi-us"
 compatibility_date = "2025-11-04"
 
-[build]
-command = "bunx run build:cf"
-
 [env.production]
 pages_build_output_dir = ".next"
 
