@@ -1,9 +1,8 @@
-export const runtime = "edge";
-export const dynamic = "force-dynamic";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
+export const dynamic = "force-dynamic";
 
 export const maxDuration = 60;
 

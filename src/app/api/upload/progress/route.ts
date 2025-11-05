@@ -1,7 +1,6 @@
-export const runtime = "edge";
-export const dynamic = "force-dynamic";
 import { type NextRequest, NextResponse } from "next/server";
 import { PostgresChunkStorage } from "@/lib/storage";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {

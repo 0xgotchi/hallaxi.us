@@ -1,5 +1,3 @@
-export const runtime = "edge";
-export const dynamic = "force-dynamic";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { type NextRequest, NextResponse } from "next/server";
 import { allowedDomains, buildPublicUrl } from "@/config/domain";
@@ -8,6 +6,7 @@ import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
 import { PostgresChunkStorage } from "@/lib/storage";
 import { generateSlug } from "@/lib/utils";
+export const dynamic = "force-dynamic";
 
 export const maxDuration = 300;
 

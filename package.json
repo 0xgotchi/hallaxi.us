@@ -1,6 +1,6 @@
 {
   "name": "hallaxi.us",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "private": true,
   "scripts": {
     "dev": "bun run next dev --turbopack",
@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.913.0",
     "@aws-sdk/lib-storage": "^3.913.0",
-    "@prisma/client": "^6.17.1",
+    "@prisma/client": "^6.18.0",
     "@radix-ui/react-progress": "^1.1.7",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",
