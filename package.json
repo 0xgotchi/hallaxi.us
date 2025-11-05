@@ -1,10 +1,10 @@
 {
   "name": "hallaxi.us",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run next dev --turbopack",
+    "dev": "next dev --turbopack",
     "build": "next build",
     "build:cf": "prisma generate && next build",
     "preview:cf": "wrangler pages dev .next",
