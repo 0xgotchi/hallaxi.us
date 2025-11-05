@@ -6,6 +6,7 @@ import prisma from "@/lib/prisma";
 import { getR2Client } from "@/lib/r2";
 import { generateSlug, generateSnowflakeId } from "@/lib/utils";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export const maxDuration = 300;
 

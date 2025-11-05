@@ -7,6 +7,7 @@ import { getR2Client } from "@/lib/r2";
 import { PostgresChunkStorage } from "@/lib/storage";
 import { generateSlug } from "@/lib/utils";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export const maxDuration = 300;
 

@@ -1,6 +1,6 @@
 {
   "name": "hallaxi.us",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "private": true,
   "scripts": {
     "dev": "bun run next dev --turbopack",

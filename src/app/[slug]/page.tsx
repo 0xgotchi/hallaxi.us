@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import ErrorPage from "@/components/page/ErrorPage";
 import prisma from "@/lib/prisma";
+export const runtime = "nodejs";
 
 interface SlugPageProps {
   params: Promise<{ slug: string }>;
