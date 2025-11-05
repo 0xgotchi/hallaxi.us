@@ -7,13 +7,10 @@ const nextConfig: NextConfig = {
     "@aws-sdk/lib-storage",
     "@prisma/client",
   ],
-
-  turbopack: {
-    root: path.resolve(__dirname),
+  trailingSlash: true,
+  images: {
+    unoptimized: true,
   },
-
-  output: "standalone",
-
   webpack(config) {
     config.resolve.modules.push(path.resolve(__dirname, "src"));
     return config;

@@ -1,21 +1,20 @@
 {
   "name": "hallaxi.us",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "bun run next dev --turbopack",
     "build": "next build",
-    "build:cf": "prisma generate && npx opennextjs-cloudflare build --yes",
-    "start": "bun run next start",
-    "preview:cf": "npx opennextjs-cloudflare preview",
-    "deploy:cf": "npx opennextjs-cloudflare deploy",
+    "build:cf": "prisma generate && next build",
+    "preview:cf": "wrangler pages dev .next",
+    "deploy:cf": "wrangler pages deploy .next",
     "lint": "biome check",
     "format": "biome format --write",
     "prisma:generate": "prisma generate",
     "prisma:dbpush": "prisma db push",
     "prisma:migrate": "prisma migrate dev --name init",
-    "prisma:studio": "prisma studio",
-    "export": "next export"
+    "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.913.0",
@@ -45,7 +44,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.0",
-    "@opennextjs/cloudflare": "^1.0.0",
+    "@opennextjs/cloudflare": "^1.11.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
