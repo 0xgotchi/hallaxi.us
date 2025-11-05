@@ -1,10 +1,10 @@
 name = "hallaxi-us"
 compatibility_date = "2025-11-04"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".open-next/assets"
+pages_build_output_dir = ".open-next"
 
 [env.production]
-pages_build_output_dir = ".open-next/assets"
+pages_build_output_dir = ".open-next"
 
 [env.preview]
-pages_build_output_dir = ".open-next/assets"
+pages_build_output_dir = ".open-next"
